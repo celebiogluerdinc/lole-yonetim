@@ -9,47 +9,85 @@ function requireAdmin(role: string) {
   if (!['super_admin', 'admin'].includes(role)) throw new Error('Yetkisiz.');
 }
 
-/** Admin creates a user (unlimited) with a temp password. */
+/** Turkish-safe slug for usernames → login e-mail. */
+function usernameToEmail(raw: string): string | null {
+  const t = raw.trim().toLowerCase();
+  if (!t) return null;
+  if (t.includes('@')) return t; // already an e-mail
+  const slug = t
+    .replace(/[ışğüçö]/g, c => (({ 'ı': 'i', 'ş': 's', 'ğ': 'g', 'ü': 'u', 'ç': 'c', 'ö': 'o' }) as any)[c] ?? c)
+    .replace(/[^a-z0-9._-]+/g, '.')
+    .replace(/^\.+|\.+$/g, '');
+  return slug ? `${slug}@lole.app` : null;
+}
+
+/**
+ * Admin creates a user (unlimited) directly from the panel:
+ * username OR e-mail + password + role + (super admin: company) + departments.
+ */
 export async function createUser(formData: FormData) {
   const schema = z.object({
     full_name: z.string().min(2).max(120),
-    email: z.string().email(),
+    identifier: z.string().min(2).max(120),
     password: z.string().min(8).max(72),
     role: z.enum(['admin', 'manager', 'staff']),
+    company_id: z.string().uuid().optional().nullable(),
     departments: z.array(z.string().uuid()).default([]),
     manager_departments: z.array(z.string().uuid()).default([])
   });
   const parsed = schema.safeParse({
     full_name: String(formData.get('full_name') ?? '').trim(),
-    email: String(formData.get('email') ?? '').trim().toLowerCase(),
+    identifier: String(formData.get('identifier') ?? '').trim(),
     password: String(formData.get('password') ?? ''),
     role: String(formData.get('role') ?? 'staff'),
+    company_id: String(formData.get('company_id') ?? '') || null,
     departments: formData.getAll('departments').map(String),
     manager_departments: formData.getAll('manager_departments').map(String)
   });
-  if (!parsed.success) return { error: 'Ad, geçerli e-posta ve en az 8 karakterli parola gerekli.' };
+  if (!parsed.success) return { error: 'Ad, kullanıcı adı ve en az 8 karakterli parola gerekli.' };
   const input = parsed.data;
 
-  const { profile, companyId } = await getCtx();
+  const email = usernameToEmail(input.identifier);
+  if (!email || !z.string().email().safeParse(email).success) {
+    return { error: 'Geçersiz kullanıcı adı. Harf, rakam, nokta ve tire kullanın.' };
+  }
+
+  const { profile, companyId: actingCompany } = await getCtx();
   requireAdmin(profile.role);
+
+  // super admin may create into ANY company; company admin only into their own
+  const companyId = profile.role === 'super_admin'
+    ? (input.company_id ?? actingCompany)
+    : actingCompany;
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
   const admin = supabaseAdmin();
+
+  // guard: only departments of the target company are honored
+  const { data: validDepts } = await admin
+    .from('departments').select('id').eq('company_id', companyId);
+  const valid = new Set((validDepts ?? []).map((d: any) => d.id));
+
   const { data, error } = await admin.auth.admin.createUser({
-    email: input.email,
+    email,
     password: input.password,
     email_confirm: true,
     user_metadata: { full_name: input.full_name, role: input.role, company_id: companyId }
   });
-  if (error) return { error: `Kullanıcı oluşturulamadı: ${error.message}` };
+  if (error) {
+    const msg = String(error.message).includes('already been registered')
+      ? 'Bu kullanıcı adı/e-posta zaten kayıtlı.'
+      : error.message;
+    return { error: `Kullanıcı oluşturulamadı: ${msg}` };
+  }
 
   await admin.from('profiles').update({
-    full_name: input.full_name, role: input.role, company_id: companyId, email: input.email
+    full_name: input.full_name, role: input.role, company_id: companyId, email
   }).eq('id', data.user.id);
 
   const memberships = new Map<string, boolean>();
-  for (const d of input.departments) memberships.set(d, false);
-  for (const d of input.manager_departments) memberships.set(d, true);
+  for (const d of input.departments) if (valid.has(d)) memberships.set(d, false);
+  for (const d of input.manager_departments) if (valid.has(d)) memberships.set(d, true);
   if (memberships.size) {
     await admin.from('department_members').upsert(
       Array.from(memberships.entries()).map(([department_id, is_manager]) => ({
@@ -60,7 +98,7 @@ export async function createUser(formData: FormData) {
   }
 
   revalidatePath('/admin/users');
-  return { ok: true };
+  return { ok: true, login: email };
 }
 
 export async function toggleUserActive(userId: string, active: boolean) {

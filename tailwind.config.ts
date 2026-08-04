@@ -5,6 +5,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // iOS system palette (Apple Reminders look)
+        ios: {
+          blue: '#007AFF',
+          red: '#FF3B30',
+          orange: '#FF9500',
+          green: '#34C759',
+          indigo: '#5856D6',
+          purple: '#AF52DE',
+          gray: '#8E8E93',
+          bg: '#F2F2F7',
+          fill: '#E9E9EB'
+        },
+        // Lole brand (logo & accents)
         brand: {
           50: '#fff8f1',
           100: '#feecdc',

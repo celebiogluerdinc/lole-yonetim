@@ -2,17 +2,32 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Megaphone } from 'lucide-react';
+import { Megaphone, Sparkles } from 'lucide-react';
 import { postAnnouncement } from '@/app/(app)/announcements/actions';
+import { aiDraftAnnouncement } from '@/app/(app)/ai/actions';
 
 export default function AnnouncementComposer({
-  departments, companyWide
-}: { departments: { id: string; name: string }[]; companyWide: boolean }) {
+  departments, companyWide, aiAvailable = false
+}: { departments: { id: string; name: string }[]; companyWide: boolean; aiAvailable?: boolean }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [aiPending, startAi] = useTransition();
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
   const router = useRouter();
   const ref = useRef<HTMLFormElement>(null);
+
+  function polish() {
+    const rough = `${title}\n${body}`.trim();
+    if (rough.length < 5) { setError('Önce birkaç kelime karalayın, yapay zeka düzenlesin.'); return; }
+    startAi(async () => {
+      setError(null);
+      const r = await aiDraftAnnouncement(rough);
+      if (r?.error) setError(r.error);
+      else if (r?.draft) { setTitle(r.draft.title ?? title); setBody(r.draft.body ?? body); }
+    });
+  }
 
   if (!open) {
     return (
@@ -36,11 +51,22 @@ export default function AnnouncementComposer({
       {error && <p className="text-sm text-rose-600">{error}</p>}
       <div>
         <label className="label">Başlık *</label>
-        <input name="title" required className="input" placeholder="Duyuru başlığı" />
+        <input name="title" required className="input" placeholder="Duyuru başlığı"
+          value={title} onChange={e => setTitle(e.target.value)} />
       </div>
       <div>
-        <label className="label">İçerik *</label>
-        <textarea name="body" required rows={4} className="input" placeholder="Ekibinize iletmek istediğiniz mesaj…" />
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="label !mb-0">İçerik *</label>
+          {aiAvailable && (
+            <button type="button" onClick={polish} disabled={aiPending}
+              className="flex items-center gap-1 text-[13px] font-semibold text-[#5E5CE6] disabled:opacity-40">
+              <Sparkles size={13} />
+              {aiPending ? 'Düzenleniyor…' : 'Yapay zeka ile güzelleştir'}
+            </button>
+          )}
+        </div>
+        <textarea name="body" required rows={4} className="input" placeholder="Ekibinize iletmek istediğiniz mesaj…"
+          value={body} onChange={e => setBody(e.target.value)} />
       </div>
       <div className="grid sm:grid-cols-2 gap-3 items-end">
         <div>

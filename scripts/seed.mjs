@@ -128,18 +128,38 @@ async function main() {
     });
     await db.from('task_assignees').insert([{ task_id: t3.id, user_id: p1 }, { task_id: t3.id, user_id: p2 }]);
 
-    await db.from('announcements').insert([
+    const { error: annErr } = await db.from('announcements').insert([
       {
-        company_id: comp.id, author_id: adminId, is_pinned: true,
+        company_id: comp.id, author_id: adminId, is_pinned: true, send_push: true,
         title: `${c.name} ekibine hoş geldiniz!`,
         body: 'Lole Yönetim uygulamamız yayında. Görevlerinizi Ana Sayfa\'dan takip edebilir, tamamladıklarınızı tik atarak işaretleyebilirsiniz. Sorularınız için yöneticinize ulaşın.'
       },
       {
-        company_id: comp.id, author_id: adminId,
+        company_id: comp.id, author_id: adminId, is_pinned: false, send_push: true,
         title: 'Fotoğraflı görevler hakkında',
         body: 'Fotoğraf zorunlu görevlerde, işi tamamladığınızı gösteren bir fotoğraf çekmeden görev kapatılamaz. Anlayışınız için teşekkürler.'
       }
     ]);
+    if (annErr) console.warn('  duyuru eklenemedi:', annErr.message);
+
+    // demo sohbet: müdür ↔ personel 1 (yalnızca hiç sohbet yoksa)
+    const { count: convCount } = await db.from('conversations')
+      .select('id', { count: 'exact', head: true }).eq('company_id', comp.id);
+    if (!convCount) {
+      const { data: conv } = await db.from('conversations').insert({
+        company_id: comp.id, type: 'dm', created_by: mgrId
+      }).select().single();
+      if (conv) {
+        await db.from('conversation_members').insert([
+          { conversation_id: conv.id, user_id: mgrId },
+          { conversation_id: conv.id, user_id: p1 }
+        ]);
+        await db.from('messages').insert([
+          { company_id: comp.id, conversation_id: conv.id, sender_id: mgrId, body: 'Merhaba! Bugünkü açılış checklistini kontrol edebilir misin?' },
+          { company_id: comp.id, conversation_id: conv.id, sender_id: p1, body: 'Tabii, hemen başlıyorum 👍' }
+        ]);
+      }
+    }
   }
 
   console.log('\n✔ Seed tamam. Giriş bilgileri:');

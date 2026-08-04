@@ -3,15 +3,38 @@
 import { useState, useTransition } from 'react';
 import { Plus, X } from 'lucide-react';
 import { createTemplate } from '@/app/(app)/manage/actions';
+import { aiDraftTemplate } from '@/app/(app)/ai/actions';
+import AiDraftBox from '@/components/AiDraftBox';
 
-export default function NewTemplateForm({ departments }: { departments: { id: string; name: string }[] }) {
+export default function NewTemplateForm({
+  departments, aiAvailable = false
+}: { departments: { id: string; name: string }[]; aiAvailable?: boolean }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [type, setType] = useState<'task' | 'checklist'>('checklist');
   const [items, setItems] = useState<string[]>(['']);
+  const [draft, setDraft] = useState<any>(null);
+  const [draftV, setDraftV] = useState(0);
+
+  function applyDraft(d: any) {
+    setDraft(d);
+    setType(d.type === 'task' ? 'task' : 'checklist');
+    setItems(Array.isArray(d.items) && d.items.length ? d.items : ['']);
+    setDraftV(v => v + 1);
+  }
 
   return (
+    <div className="space-y-5">
+    {aiAvailable && (
+      <AiDraftBox
+        placeholder='Örn: "Patisserie mutfağı için aylık derin temizlik şablonu hazırla"'
+        hint="Yapay zeka sektör iyi uygulamalarından madde madde bir şablon önerir; düzenleyip kaydedersiniz."
+        action={aiDraftTemplate}
+        onDraft={applyDraft}
+      />
+    )}
     <form
+      key={draftV}
       action={(fd) => start(async () => {
         setError(null);
         const r = await createTemplate(fd);
@@ -22,11 +45,10 @@ export default function NewTemplateForm({ departments }: { departments: { id: st
       {error && <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
       <div className="card p-5 space-y-4">
-        <div className="flex rounded-xl bg-slate-100 p-1">
+        <div className="segment">
           {(['checklist', 'task'] as const).map(t => (
             <button key={t} type="button" onClick={() => setType(t)}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
-                type === t ? 'bg-white shadow-sm' : 'text-slate-500'}`}>
+              className={`segment-item ${type === t ? 'segment-item-active' : ''}`}>
               {t === 'task' ? 'Tekil Görev' : 'Checklist'}
             </button>
           ))}
@@ -35,11 +57,12 @@ export default function NewTemplateForm({ departments }: { departments: { id: st
 
         <div>
           <label className="label">Şablon adı *</label>
-          <input name="name" required className="input" placeholder="Örn: Günlük Açılış Checklisti" />
+          <input name="name" required className="input" placeholder="Örn: Günlük Açılış Checklisti"
+            defaultValue={draft?.name ?? ''} />
         </div>
         <div>
           <label className="label">Açıklama</label>
-          <textarea name="description" rows={2} className="input" />
+          <textarea name="description" rows={2} className="input" defaultValue={draft?.description ?? ''} />
         </div>
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
@@ -51,7 +74,7 @@ export default function NewTemplateForm({ departments }: { departments: { id: st
           </div>
           <div>
             <label className="label">Varsayılan öncelik</label>
-            <select name="default_priority" defaultValue="normal" className="input">
+            <select name="default_priority" defaultValue={draft?.default_priority ?? 'normal'} className="input">
               <option value="low">Düşük</option>
               <option value="normal">Normal</option>
               <option value="high">Yüksek</option>
@@ -59,14 +82,16 @@ export default function NewTemplateForm({ departments }: { departments: { id: st
             </select>
           </div>
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-2">
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" name="requires_photo" className="rounded accent-[#ff5a1f] w-4 h-4" />
-            📷 Fotoğraf zorunlu
+        <div className="divide-y divide-black/[0.06]">
+          <label className="flex items-center justify-between py-2.5 cursor-pointer">
+            <span className="text-[15px]">📷 Fotoğraf zorunlu</span>
+            <input type="checkbox" name="requires_photo" className="switch"
+              defaultChecked={!!draft?.requires_photo} />
           </label>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input type="checkbox" name="requires_approval" className="rounded accent-[#ff5a1f] w-4 h-4" />
-            ✅ Yönetici onayı gerekli
+          <label className="flex items-center justify-between py-2.5 cursor-pointer">
+            <span className="text-[15px]">✅ Yönetici onayı gerekli</span>
+            <input type="checkbox" name="requires_approval" className="switch"
+              defaultChecked={!!draft?.requires_approval} />
           </label>
         </div>
 
@@ -86,7 +111,7 @@ export default function NewTemplateForm({ departments }: { departments: { id: st
                 </div>
               ))}
               <button type="button" onClick={() => setItems(arr => [...arr, ''])}
-                className="btn-ghost text-brand-600 text-sm"><Plus size={15} /> Madde ekle</button>
+                className="btn-ghost text-ios-blue text-sm"><Plus size={15} /> Madde ekle</button>
             </div>
           </div>
         )}
@@ -96,5 +121,6 @@ export default function NewTemplateForm({ departments }: { departments: { id: st
         {pending ? 'Kaydediliyor…' : 'Şablonu Kaydet'}
       </button>
     </form>
+    </div>
   );
 }

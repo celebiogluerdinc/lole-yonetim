@@ -1,11 +1,8 @@
-import Link from 'next/link';
 import { getCtx } from '@/lib/auth';
 import { logout } from '@/app/login/actions';
 import { ROLE_LABEL } from '@/lib/utils';
-import {
-  Home, Calendar, Megaphone, PlusSquare, LayoutTemplate,
-  Users, Building2, Landmark, LogOut
-} from 'lucide-react';
+import NavLink, { type IconName } from '@/components/NavLink';
+import { LogOut } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,33 +10,48 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { supabase, profile, companyId } = await getCtx();
 
   let companyName = 'Lole Yönetim';
-  if (companyId) {
-    const { data: c } = await supabase.from('companies').select('name').eq('id', companyId).maybeSingle();
-    if (c) companyName = c.name;
-  } else if (profile.role === 'super_admin') {
-    companyName = 'Tüm Şirketler';
-  }
+  const [companyRes, { count: unreadCount }] = await Promise.all([
+    companyId
+      ? supabase.from('companies').select('name').eq('id', companyId).maybeSingle()
+      : Promise.resolve({ data: null } as any),
+    supabase.from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', profile.id)
+      .is('read_at', null)
+  ]);
+  if (companyRes?.data) companyName = companyRes.data.name;
+  else if (profile.role === 'super_admin') companyName = 'Tüm Şirketler';
+  const unread = unreadCount ?? 0;
 
   const isManagerRole = ['super_admin', 'admin', 'manager'].includes(profile.role);
   const isAdminRole = ['super_admin', 'admin'].includes(profile.role);
 
-  const nav = [
-    { href: '/home', label: 'Ana Sayfa', icon: Home, show: true },
-    { href: '/calendar', label: 'Takvim', icon: Calendar, show: true },
-    { href: '/announcements', label: 'Duyurular', icon: Megaphone, show: true },
-    { href: '/manage/tasks/new', label: 'Görev Oluştur', icon: PlusSquare, show: isManagerRole },
-    { href: '/manage/templates', label: 'Şablonlar', icon: LayoutTemplate, show: isManagerRole },
-    { href: '/admin/users', label: 'Kullanıcılar', icon: Users, show: isAdminRole },
-    { href: '/admin/departments', label: 'Departmanlar', icon: Building2, show: isAdminRole },
-    { href: '/super/companies', label: 'Şirketler', icon: Landmark, show: profile.role === 'super_admin' }
-  ].filter(n => n.show);
+  const nav = ([
+    { href: '/home', label: 'Ana Sayfa', icon: 'home', show: true, badge: 0 },
+    { href: '/messages', label: 'Mesajlar', icon: 'chat', show: true, badge: 0 },
+    { href: '/assistant', label: 'Lole Asistan', icon: 'sparkles', show: !!process.env.ANTHROPIC_API_KEY, badge: 0 },
+    { href: '/notifications', label: 'Bildirimler', icon: 'bell', show: true, badge: unread },
+    { href: '/calendar', label: 'Takvim', icon: 'calendar', show: true, badge: 0 },
+    { href: '/announcements', label: 'Duyurular', icon: 'megaphone', show: true, badge: 0 },
+    { href: '/performance', label: 'Performans', icon: 'chart', show: true, badge: 0 },
+    { href: '/shifts', label: 'Vardiyalar', icon: 'shift', show: true, badge: 0 },
+    { href: '/leave', label: 'İzinler', icon: 'leave', show: true, badge: 0 },
+    { href: '/clock', label: 'Mesai', icon: 'clock', show: true, badge: 0 },
+    { href: '/manage/tasks/new', label: 'Görev Oluştur', icon: 'plus', show: isManagerRole, badge: 0 },
+    { href: '/manage/templates', label: 'Şablonlar', icon: 'template', show: isManagerRole, badge: 0 },
+    { href: '/admin/users', label: 'Kullanıcılar', icon: 'users', show: isAdminRole, badge: 0 },
+    { href: '/admin/departments', label: 'Departmanlar', icon: 'building', show: isAdminRole, badge: 0 },
+    { href: '/super/companies', label: 'Şirketler', icon: 'landmark', show: profile.role === 'super_admin', badge: 0 }
+  ] as const).filter(n => n.show) as unknown as { href: string; label: string; icon: IconName; show: boolean; badge: number }[];
 
   return (
     <div className="min-h-dvh flex">
-      {/* Sidebar — desktop */}
-      <aside className="hidden md:flex w-60 flex-col border-r border-slate-200 bg-white p-4 sticky top-0 h-dvh">
+      {/* Sidebar — desktop (macOS Reminders style) */}
+      <aside className="hidden md:flex w-60 flex-col border-r border-black/[0.06] bg-[#F2F2F7] p-4 sticky top-0 h-dvh">
         <div className="flex items-center gap-2.5 px-2 mb-6">
-          <div className="w-9 h-9 rounded-xl bg-brand-500 text-white flex items-center justify-center font-bold">L</div>
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-white flex items-center justify-center font-bold shadow-sm">
+            L
+          </div>
           <div className="min-w-0">
             <p className="font-semibold text-sm leading-tight truncate">{companyName}</p>
             <p className="text-xs text-slate-400">Lole Yönetim</p>
@@ -47,20 +59,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
         <nav className="flex-1 space-y-1">
           {nav.map(n => (
-            <Link key={n.href} href={n.href}
-              className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors">
-              <n.icon size={18} strokeWidth={2} />
-              {n.label}
-            </Link>
+            <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} />
           ))}
         </nav>
-        <div className="border-t border-slate-100 pt-3 mt-3">
-          <div className="px-3 pb-2">
-            <p className="text-sm font-medium truncate">{profile.full_name || profile.email}</p>
-            <p className="text-xs text-slate-400">{ROLE_LABEL[profile.role]}</p>
+        <div className="border-t border-black/[0.06] pt-3 mt-3">
+          <div className="flex items-center gap-2.5 px-3 pb-2">
+            <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-xs font-bold shrink-0">
+              {(profile.full_name || profile.email)[0]?.toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{profile.full_name || profile.email}</p>
+              <p className="text-xs text-slate-400">{ROLE_LABEL[profile.role]}</p>
+            </div>
           </div>
           <form action={logout}>
-            <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-500 hover:bg-slate-100">
+            <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-[#8E8E93] hover:bg-black/5 transition-colors">
               <LogOut size={16} /> Çıkış yap
             </button>
           </form>
@@ -73,13 +86,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
 
       {/* Bottom bar — mobile */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur border-t border-slate-200 flex justify-around py-2 z-40">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/80 backdrop-blur-xl border-t border-black/[0.08] flex justify-around py-1.5 z-40 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {nav.slice(0, 5).map(n => (
-          <Link key={n.href} href={n.href}
-            className="flex flex-col items-center gap-0.5 px-3 py-1 text-[11px] text-slate-500">
-            <n.icon size={20} strokeWidth={2} />
-            {n.label.split(' ')[0]}
-          </Link>
+          <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} mobile />
         ))}
       </nav>
     </div>

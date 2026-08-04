@@ -26,12 +26,12 @@ export default async function TemplatesPage() {
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">Şablonlar</h1>
+        <h1 className="text-[28px] leading-tight font-bold tracking-tight">Şablonlar</h1>
         <Link href="/manage/templates/new" className="btn-primary"><Plus size={16} /> Yeni Şablon</Link>
       </div>
 
       {(templates ?? []).length === 0 && (
-        <div className="card p-10 text-center text-sm text-slate-500">
+        <div className="card p-10 text-center text-sm text-[#8E8E93]">
           Henüz şablon yok. Sık kullandığınız görev ve checklistleri şablon olarak kaydedin,
           tek dokunuşla atayın.
         </div>

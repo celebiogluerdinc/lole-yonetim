@@ -50,7 +50,7 @@ export default async function CalendarPage({
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">Takvim</h1>
+        <h1 className="text-[28px] leading-tight font-bold tracking-tight">Takvim</h1>
         <div className="flex items-center gap-1">
           <Link href={`/calendar?m=${prev}&scope=${scope}`} className="btn-ghost !px-2"><ChevronLeft size={18} /></Link>
           <span className="text-sm font-medium min-w-[130px] text-center capitalize">{monthLabel}</span>
@@ -61,32 +61,32 @@ export default async function CalendarPage({
       {isManager && (
         <div className="flex gap-1.5 mb-5">
           <Link href={`/calendar?m=${y}-${m}&scope=mine`}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === 'mine' ? 'bg-brand-500 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
+            className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === 'mine' ? 'bg-ios-blue text-white' : 'bg-white text-[#3a3a3c]'}`}>
             Benim ajandam
           </Link>
           <Link href={`/calendar?m=${y}-${m}&scope=team`}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === 'team' ? 'bg-brand-500 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
+            className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === 'team' ? 'bg-ios-blue text-white' : 'bg-white text-[#3a3a3c]'}`}>
             Ekip takvimi
           </Link>
         </div>
       )}
 
       {Object.keys(byDay).length === 0 && (
-        <div className="card p-10 text-center text-sm text-slate-500">Bu ay planlanmış görev yok.</div>
+        <div className="card p-10 text-center text-sm text-[#8E8E93]">Bu ay planlanmış görev yok.</div>
       )}
 
       <div className="space-y-5">
         {Object.entries(byDay).map(([day, list]) => (
           <section key={day}>
-            <h2 className="text-sm font-semibold text-slate-500 mb-2 capitalize">{day}</h2>
+            <h2 className="text-sm font-semibold text-[#8E8E93] mb-2 capitalize">{day}</h2>
             <div className="card divide-y divide-slate-100">
               {list.map(t => (
                 <Link key={t.id} href={`/tasks/${t.id}`}
                   className="flex items-center gap-3 p-3.5 hover:bg-slate-50 transition-colors">
-                  <span className="text-xs font-semibold text-brand-600 w-12 shrink-0">
+                  <span className="text-xs font-semibold text-ios-blue w-12 shrink-0">
                     {new Date(t.due_at).toLocaleTimeString('tr-TR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })}
                   </span>
-                  <span className={`flex-1 text-sm truncate ${t.status === 'completed' ? 'line-through text-slate-400' : ''}`}>
+                  <span className={`flex-1 text-sm truncate ${t.status === 'completed' ? 'line-through text-[#AEAEB2]' : ''}`}>
                     {t.title}
                   </span>
                   <span className={`badge ${STATUS_COLOR[t.status as keyof typeof STATUS_COLOR]}`}>

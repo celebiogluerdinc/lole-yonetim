@@ -44,7 +44,7 @@ export default async function AnnouncementsPage() {
 
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8">
-      <h1 className="text-2xl font-bold tracking-tight mb-6">📌 Pano &amp; Duyurular</h1>
+      <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-6">📌 Pano &amp; Duyurular</h1>
 
       <MarkRead ids={unreadIds} />
 
@@ -52,12 +52,13 @@ export default async function AnnouncementsPage() {
         <AnnouncementComposer
           departments={postableDepts as any}
           companyWide={['super_admin', 'admin'].includes(profile.role)}
+          aiAvailable={!!process.env.ANTHROPIC_API_KEY}
         />
       )}
 
       <div className="space-y-4 mt-6">
         {(anns ?? []).length === 0 && (
-          <div className="card p-10 text-center text-sm text-slate-500">Henüz duyuru yok.</div>
+          <div className="card p-10 text-center text-sm text-[#8E8E93]">Henüz duyuru yok.</div>
         )}
         {(anns ?? []).map(a => (
           <article key={a.id} className={`card p-5 ${a.is_pinned ? 'border-brand-200 bg-brand-50/40' : ''}`}>
@@ -71,7 +72,7 @@ export default async function AnnouncementsPage() {
               )}
             </div>
             <p className="text-sm text-slate-600 mt-2 whitespace-pre-wrap">{a.body}</p>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-xs text-slate-400">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-xs text-[#AEAEB2]">
               <span>{a.profiles?.full_name ?? 'Yönetim'}</span>
               <span>·</span>
               <span>{fmtDate(a.created_at)}</span>

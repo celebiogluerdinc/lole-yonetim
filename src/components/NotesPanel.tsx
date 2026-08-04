@@ -2,7 +2,7 @@
 
 import { useRef, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { StickyNote, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { addNote, deleteNote } from '@/app/(app)/home/actions';
 import { fmtDate } from '@/lib/utils';
 
@@ -14,44 +14,50 @@ export default function NotesPanel({ notes }: { notes: NoteT[] }) {
   const ref = useRef<HTMLFormElement>(null);
 
   return (
-    <section className="card p-4">
-      <h2 className="font-semibold text-sm text-slate-700 flex items-center gap-2 mb-3">
-        <StickyNote size={16} className="text-brand-500" /> Notlarım
-      </h2>
-
-      <form
-        ref={ref}
-        action={(fd) => start(async () => {
-          await addNote(fd);
-          ref.current?.reset();
-          router.refresh();
-        })}
-        className="flex gap-2 mb-3"
-      >
-        <input name="body" required placeholder="Hızlı not ekle…" className="input" />
-        <button className="btn-primary shrink-0" disabled={pending}>Ekle</button>
-      </form>
-
-      <ul className="space-y-2">
-        {notes.length === 0 && (
-          <li className="text-sm text-slate-400 text-center py-2">Henüz not yok.</li>
-        )}
+    <section>
+      <h2 className="section-title">Notlarım</h2>
+      <div className="card divide-y divide-black/[0.06] overflow-hidden">
         {notes.map(n => (
-          <li key={n.id} className="flex items-start gap-2 group rounded-xl bg-slate-50 px-3 py-2">
+          <div key={n.id} className="flex items-start gap-3 px-4 py-2.5 group">
             <div className="flex-1 min-w-0">
-              <p className="text-sm whitespace-pre-wrap break-words">{n.body}</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">{fmtDate(n.created_at)}</p>
+              <p className="text-[15px] whitespace-pre-wrap break-words leading-snug">{n.body}</p>
+              <p className="text-[12px] text-[#8E8E93] mt-0.5">{fmtDate(n.created_at)}</p>
             </div>
             <button
               aria-label="Notu sil"
               onClick={() => start(async () => { await deleteNote(n.id); router.refresh(); })}
-              className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-500 transition-all p-1"
+              className="opacity-0 group-hover:opacity-100 text-[#AEAEB2] hover:text-ios-red transition-all p-1 mt-0.5"
             >
-              <Trash2 size={14} />
+              <Trash2 size={15} />
             </button>
-          </li>
+          </div>
         ))}
-      </ul>
+
+        {/* Apple-style "+ Yeni Anımsatıcı" quick-add row */}
+        <form
+          ref={ref}
+          action={(fd) => start(async () => {
+            await addNote(fd);
+            ref.current?.reset();
+            router.refresh();
+          })}
+          className="flex items-center gap-3 px-4 py-2.5"
+        >
+          <span className="w-[22px] h-[22px] rounded-full bg-ios-blue text-white flex items-center justify-center shrink-0">
+            <Plus size={14} strokeWidth={2.6} />
+          </span>
+          <input
+            name="body"
+            required
+            disabled={pending}
+            placeholder="Yeni not"
+            className="flex-1 bg-transparent outline-none text-[15px] placeholder:text-[#AEAEB2]"
+          />
+          <button className="text-ios-blue text-[15px] font-semibold disabled:opacity-40" disabled={pending}>
+            Ekle
+          </button>
+        </form>
+      </div>
     </section>
   );
 }

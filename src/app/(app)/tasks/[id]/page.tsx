@@ -23,11 +23,14 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
         : Promise.resolve({ data: null } as any)
     ]);
 
-  // signed URLs for attachments (1 hour)
+  // signed URLs for attachments (1 hour) — single bulk request
   const signed: Record<string, string> = {};
-  for (const a of attachments ?? []) {
-    const { data } = await supabase.storage.from('attachments').createSignedUrl(a.storage_path, 3600);
-    if (data?.signedUrl) signed[a.id] = data.signedUrl;
+  if ((attachments ?? []).length) {
+    const paths = (attachments ?? []).map((a: any) => a.storage_path);
+    const { data: urls } = await supabase.storage.from('attachments').createSignedUrls(paths, 3600);
+    (urls ?? []).forEach((u: any, i: number) => {
+      if (u?.signedUrl) signed[(attachments as any)[i].id] = u.signedUrl;
+    });
   }
 
   const isAssignee = (assignees ?? []).some((a: any) => a.user_id === profile.id);
@@ -50,11 +53,11 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
         </div>
 
         <div className="flex flex-wrap gap-x-5 gap-y-2 mt-4 text-sm">
-          <span className="text-slate-500">📅 {fmtDate(task.due_at)}</span>
+          <span className="text-[#8E8E93]">📅 {fmtDate(task.due_at)}</span>
           <span className={PRIORITY_COLOR[task.priority as keyof typeof PRIORITY_COLOR]}>
             ⚑ {PRIORITY_LABEL[task.priority as keyof typeof PRIORITY_LABEL]}
           </span>
-          {dept?.name && <span className="text-slate-500">🏷 {dept.name}</span>}
+          {dept?.name && <span className="text-[#8E8E93]">🏷 {dept.name}</span>}
           {task.requires_photo && (
             <span className="text-amber-700 flex items-center gap-1"><Camera size={14} /> Fotoğraf zorunlu</span>
           )}
@@ -62,12 +65,12 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
             <span className="text-blue-700 flex items-center gap-1"><ShieldCheck size={14} /> Yönetici onaylı</span>
           )}
           {task.recurrence_rule && (
-            <span className="text-slate-500 flex items-center gap-1"><Repeat size={14} /> Tekrarlı</span>
+            <span className="text-[#8E8E93] flex items-center gap-1"><Repeat size={14} /> Tekrarlı</span>
           )}
         </div>
 
         {(assignees ?? []).length > 0 && (
-          <p className="text-xs text-slate-400 mt-3">
+          <p className="text-xs text-[#AEAEB2] mt-3">
             Atanan: {(assignees ?? []).map((a: any) => a.profiles?.full_name).filter(Boolean).join(', ')}
           </p>
         )}

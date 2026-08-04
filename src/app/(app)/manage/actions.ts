@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { RRule, Weekday } from 'rrule';
 import { getCtx } from '@/lib/auth';
+import { pushToUsers } from '@/lib/push';
 
 const WD: Record<string, Weekday> = {
   MO: RRule.MO, TU: RRule.TU, WE: RRule.WE, TH: RRule.TH,
@@ -125,6 +126,13 @@ export async function createTask(formData: FormData): Promise<{ error?: string }
         payload: { task_id: task.id, title: input.title, due_at: d.toISOString() }
       }))
     );
+    if (dates.indexOf(d) === 0) {
+      pushToUsers(input.assignees, {
+        title: '📋 Size yeni görev atandı',
+        body: input.title,
+        url: `/tasks/${task.id}`
+      }).catch(() => {});
+    }
   }
 
   await supabase.from('activity_log').insert({
@@ -233,6 +241,11 @@ export async function instantiateTemplate(formData: FormData): Promise<{ error?:
       payload: { task_id: task.id, title: tpl.name }
     }))
   );
+  pushToUsers(assignees, {
+    title: '📋 Size yeni görev atandı',
+    body: tpl.name,
+    url: `/tasks/${task.id}`
+  }).catch(() => {});
   revalidatePath('/home');
   redirect(`/tasks/${task.id}`);
 }

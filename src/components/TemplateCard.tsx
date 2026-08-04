@@ -22,11 +22,11 @@ export default function TemplateCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="font-semibold flex items-center gap-2">
-            {template.type === 'checklist' && <ClipboardList size={16} className="text-brand-500" />}
+            {template.type === 'checklist' && <ClipboardList size={16} className="text-ios-blue" />}
             {template.name}
           </h3>
-          {template.description && <p className="text-sm text-slate-500 mt-0.5">{template.description}</p>}
-          <div className="flex flex-wrap gap-2 mt-2 text-xs text-slate-400">
+          {template.description && <p className="text-sm text-[#8E8E93] mt-0.5">{template.description}</p>}
+          <div className="flex flex-wrap gap-2 mt-2 text-xs text-[#AEAEB2]">
             {departmentName && <span>🏷 {departmentName}</span>}
             {template.requires_photo && <span>📷 Fotoğraflı</span>}
             {template.requires_approval && <span>✅ Onaylı</span>}
@@ -41,11 +41,11 @@ export default function TemplateCard({
       {items.length > 0 && (
         <ul className="mt-3 space-y-1">
           {items.slice(0, 4).map(it => (
-            <li key={it.id} className="text-sm text-slate-500 flex items-center gap-2">
+            <li key={it.id} className="text-sm text-[#8E8E93] flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" /> {it.title}
             </li>
           ))}
-          {items.length > 4 && <li className="text-xs text-slate-400">+{items.length - 4} madde daha</li>}
+          {items.length > 4 && <li className="text-xs text-[#AEAEB2]">+{items.length - 4} madde daha</li>}
         </ul>
       )}
 

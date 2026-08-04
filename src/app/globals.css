@@ -7,30 +7,83 @@
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  background: #f2f2f7;
+  @apply text-[#1c1c1e] antialiased;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display',
+    'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
+/* iOS grouped card — white, rounded, hairline shadow, no border */
 .card {
-  @apply bg-white rounded-2xl border border-slate-200 shadow-sm;
+  @apply bg-white rounded-2xl;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+}
+
+/* iOS grouped-list section header */
+.section-title {
+  @apply text-[13px] font-semibold text-[#6d6d72] uppercase tracking-wide px-4 mb-2;
 }
 
 .btn {
-  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none;
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[15px] font-semibold transition-all active:scale-[0.98] active:opacity-70 disabled:opacity-40 disabled:pointer-events-none;
 }
-.btn-primary { @apply btn bg-brand-500 text-white hover:bg-brand-600; }
-.btn-ghost { @apply btn bg-transparent text-slate-600 hover:bg-slate-100; }
-.btn-outline { @apply btn border border-slate-300 text-slate-700 hover:bg-slate-50; }
-.btn-danger { @apply btn bg-rose-600 text-white hover:bg-rose-700; }
+.btn-primary { @apply btn bg-ios-blue text-white; }
+.btn-ghost { @apply btn bg-transparent text-ios-blue !font-normal; }
+.btn-outline { @apply btn bg-ios-fill text-ios-blue; }
+.btn-danger { @apply btn bg-ios-red text-white; }
 
 .input {
-  @apply w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 placeholder:text-slate-400;
+  @apply w-full rounded-xl px-3.5 py-2.5 text-[15px] outline-none border border-transparent transition-colors;
+  background: rgba(118, 118, 128, 0.12);
 }
-.label { @apply block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide; }
+.input::placeholder { color: rgba(60, 60, 67, 0.3); }
+.input:focus {
+  @apply bg-white border-ios-blue/40 ring-4 ring-ios-blue/10;
+}
+
+.label {
+  @apply block text-[13px] font-semibold text-[#6d6d72] uppercase tracking-wide mb-1.5;
+}
 
 .badge { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium; }
 
 /* Reminders-style tick circle */
 .tick {
-  @apply w-6 h-6 rounded-full border-2 border-slate-300 flex items-center justify-center shrink-0 transition-all hover:border-brand-500 cursor-pointer;
+  @apply w-[22px] h-[22px] rounded-full flex items-center justify-center shrink-0 transition-all cursor-pointer;
+  border: 1.5px solid #c7c7cc;
 }
-.tick-done { @apply bg-brand-500 border-brand-500 text-white; }
+.tick:hover { @apply border-ios-blue; }
+.tick-done { @apply bg-ios-blue text-white; border-color: #007aff; }
+
+/* iOS toggle switch — use on <input type="checkbox" class="switch"> */
+.switch {
+  @apply relative appearance-none cursor-pointer shrink-0 transition-colors duration-200;
+  width: 51px; height: 31px; border-radius: 999px; background: #e9e9ea;
+}
+.switch:checked { background: #34c759; }
+.switch::before {
+  content: '';
+  position: absolute; top: 2px; left: 2px;
+  width: 27px; height: 27px; border-radius: 999px; background: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
+  transition: transform 0.2s ease;
+}
+.switch:checked::before { transform: translateX(20px); }
+
+/* iOS segmented control */
+.segment {
+  @apply flex rounded-lg p-0.5;
+  background: rgba(118, 118, 128, 0.12);
+}
+.segment-item {
+  @apply flex-1 rounded-[7px] py-1.5 text-[13px] font-medium text-center text-[#1c1c1e] transition-all cursor-pointer;
+}
+.segment-item-active { @apply bg-white shadow-sm font-semibold; }
+
+/* Smart-list grid card (Reminders home) */
+.smart-card {
+  @apply card p-3 flex flex-col gap-1.5 transition-transform active:scale-[0.97];
+}
+.smart-icon {
+  @apply w-8 h-8 rounded-full flex items-center justify-center text-white shrink-0;
+}

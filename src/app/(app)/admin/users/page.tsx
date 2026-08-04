@@ -11,10 +11,16 @@ export default async function UsersPage() {
   if (!['super_admin', 'admin'].includes(profile.role)) redirect('/home');
   if (!companyId) redirect(profile.role === 'super_admin' ? '/super/companies' : '/home');
 
-  const [{ data: users }, { data: depts }, { data: memberships }] = await Promise.all([
+  const isSuper = profile.role === 'super_admin';
+  const [{ data: users }, { data: depts }, { data: memberships }, { data: companies }] = await Promise.all([
     supabase.from('profiles').select('*').eq('company_id', companyId).order('full_name'),
-    supabase.from('departments').select('id, name').eq('company_id', companyId).order('name'),
-    supabase.from('department_members').select('department_id, user_id, is_manager')
+    isSuper
+      ? supabase.from('departments').select('id, name, company_id').order('name')
+      : supabase.from('departments').select('id, name, company_id').eq('company_id', companyId).order('name'),
+    supabase.from('department_members').select('department_id, user_id, is_manager'),
+    isSuper
+      ? supabase.from('companies').select('id, name').eq('is_active', true).order('name')
+      : Promise.resolve({ data: [] } as any)
   ]);
 
   const deptName: Record<string, string> = {};
@@ -30,21 +36,26 @@ export default async function UsersPage() {
 
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8">
-      <h1 className="text-2xl font-bold tracking-tight mb-6">Kullanıcılar</h1>
+      <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-6">Kullanıcılar</h1>
 
-      <NewUserForm departments={(depts ?? []) as any} />
+      <NewUserForm
+        departments={(depts ?? []) as any}
+        companies={(companies ?? []) as any}
+        defaultCompanyId={companyId}
+        isSuper={isSuper}
+      />
 
       <div className="card divide-y divide-slate-100 mt-6">
         {(users ?? []).map(u => (
           <div key={u.id} className="flex items-center gap-3 p-4">
-            <div className="w-9 h-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-sm font-bold shrink-0">
+            <div className="w-9 h-9 rounded-full bg-ios-blue/10 text-ios-blue flex items-center justify-center text-sm font-bold shrink-0">
               {(u.full_name || u.email)[0]?.toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <p className={`text-sm font-medium truncate ${u.is_active ? '' : 'text-slate-400 line-through'}`}>
+              <p className={`text-sm font-medium truncate ${u.is_active ? '' : 'text-[#AEAEB2] line-through'}`}>
                 {u.full_name || u.email}
               </p>
-              <p className="text-xs text-slate-400 truncate">
+              <p className="text-xs text-[#AEAEB2] truncate">
                 {ROLE_LABEL[u.role]} · {u.email}
                 {userDepts[u.id]?.length ? ` · ${userDepts[u.id].join(', ')}` : ''}
               </p>

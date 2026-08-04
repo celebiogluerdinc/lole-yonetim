@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
+import { pushToUsers } from '@/lib/push';
 
 export async function postAnnouncement(formData: FormData) {
   const schema = z.object({
@@ -58,6 +59,11 @@ export async function postAnnouncement(formData: FormData) {
       company_id: companyId, user_id, type: 'announcement',
       payload: { announcement_id: ann.id, title: input.title }
     })));
+    pushToUsers(audience, {
+      title: `📌 ${input.title}`,
+      body: input.body.slice(0, 120),
+      url: '/announcements'
+    }).catch(() => {});
   }
 
   revalidatePath('/announcements');

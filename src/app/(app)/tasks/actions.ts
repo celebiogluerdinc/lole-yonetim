@@ -3,6 +3,13 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
+import { pushToUsers } from '@/lib/push';
+
+const PUSH_TITLES: Record<string, string> = {
+  task_completed: '✅ Görev tamamlandı',
+  task_pending_review: '🔍 Onayınız bekleniyor',
+  task_blocked: '🚧 Engel bildirildi'
+};
 
 async function log(supabase: any, companyId: string | null, actorId: string, entity_type: string, entity_id: string, action: string, meta: any = {}) {
   await supabase.from('activity_log').insert({
@@ -23,9 +30,15 @@ async function notifyManagers(supabase: any, task: any, type: string, payload: a
     .from('profiles').select('id').eq('company_id', task.company_id).eq('role', 'admin');
   for (const a of admins ?? []) targets.add(a.id);
   if (targets.size) {
+    const ids = Array.from(targets);
     await supabase.from('notifications').insert(
-      Array.from(targets).map(user_id => ({ company_id: task.company_id, user_id, type, payload }))
+      ids.map(user_id => ({ company_id: task.company_id, user_id, type, payload }))
     );
+    pushToUsers(ids, {
+      title: PUSH_TITLES[type] ?? 'Lole Yönetim',
+      body: `${payload.title ?? ''}${payload.by ? ` — ${payload.by}` : ''}`,
+      url: `/tasks/${task.id}`
+    }).catch(() => {});
   }
 }
 
@@ -176,10 +189,16 @@ export async function reviewTask(taskId: string, approve: boolean, note?: string
     // notify assignees
     const { data: asg } = await supabase.from('task_assignees').select('user_id').eq('task_id', taskId);
     if (asg?.length) {
-      await supabase.from('notifications').insert(asg.map((a: any) => ({
-        company_id: task.company_id, user_id: a.user_id, type: 'task_rejected',
+      const ids = asg.map((a: any) => a.user_id);
+      await supabase.from('notifications').insert(ids.map((user_id: string) => ({
+        company_id: task.company_id, user_id, type: 'task_rejected',
         payload: { task_id: taskId, title: task.title, note: n.data }
       })));
+      pushToUsers(ids, {
+        title: '↩️ Görev reddedildi',
+        body: `${task.title}: ${n.data}`,
+        url: `/tasks/${taskId}`
+      }).catch(() => {});
     }
   }
   revalidatePath(`/tasks/${taskId}`);
@@ -205,7 +224,7 @@ export async function uploadAttachment(formData: FormData) {
     .upload(path, buf, { contentType: file.type || 'application/octet-stream' });
   if (upErr) return { error: `Yükleme başarısız: ${upErr.message}` };
 
-  const { error } = await supabase.from('attachments').insert({
+  const { data: att, error } = await supabase.from('attachments').insert({
     company_id: task.company_id,
     task_id: taskId,
     checklist_item_id: itemId,
@@ -214,10 +233,38 @@ export async function uploadAttachment(formData: FormData) {
     file_name: file.name,
     mime_type: file.type,
     size_bytes: file.size
-  });
+  }).select().single();
   if (error) return { error: error.message };
 
   await log(supabase, task.company_id, profile.id, 'attachment', taskId, 'uploaded', { file: file.name });
+
+  // Fotoğraf Denetçisi (vision): flags implausible proof photos for the reviewer.
+  // Never blocks the upload; failures are silent.
+  if (
+    task.requires_photo &&
+    file.type?.startsWith('image/') &&
+    file.size < 3_500_000 &&
+    process.env.ANTHROPIC_API_KEY
+  ) {
+    try {
+      const { verifyPhoto, checkAllowance, logRun } = await import('@/lib/ai');
+      const blocked = await checkAllowance(task.company_id, 'photo_verifier');
+      if (!blocked) {
+        const res = await verifyPhoto(buf.toString('base64'), file.type, task.title, task.description);
+        const { supabaseAdmin } = await import('@/lib/supabase/server');
+        await supabaseAdmin().from('attachments')
+          .update({ ai_verdict: res.verdict, ai_note: res.note })
+          .eq('id', att.id);
+        await logRun({
+          companyId: task.company_id, agent: 'photo_verifier', userId: profile.id,
+          input: { task_id: taskId, file: file.name },
+          output: { verdict: res.verdict, note: res.note },
+          inputTokens: res.inputTokens, outputTokens: res.outputTokens
+        });
+      }
+    } catch { /* vision check is best-effort */ }
+  }
+
   revalidatePath(`/tasks/${taskId}`);
   return { ok: true };
 }

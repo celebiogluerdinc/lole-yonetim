@@ -10,7 +10,7 @@ import {
   uploadAttachment, addTaskNote
 } from '@/app/(app)/tasks/actions';
 
-interface Att { id: string; file_name: string; mime_type: string | null; url?: string; created_at: string; checklist_item_id: string | null; }
+interface Att { id: string; file_name: string; mime_type: string | null; url?: string; created_at: string; checklist_item_id: string | null; ai_verdict?: string | null; ai_note?: string | null; }
 interface NoteT { id: string; body: string; created_at: string; profiles?: { full_name: string } | null; }
 
 export default function TaskDetailClient({
@@ -69,9 +69,9 @@ export default function TaskDetailClient({
                 {item.is_done && <Check size={14} strokeWidth={3} />}
               </button>
               <div className="flex-1 min-w-0">
-                <p className={`text-sm ${item.is_done ? 'line-through text-slate-400' : ''}`}>{item.title}</p>
+                <p className={`text-sm ${item.is_done ? 'line-through text-[#AEAEB2]' : ''}`}>{item.title}</p>
                 {item.is_done && item.done_at && (
-                  <p className="text-[11px] text-slate-400">{fmtDate(item.done_at)}</p>
+                  <p className="text-[11px] text-[#AEAEB2]">{fmtDate(item.done_at)}</p>
                 )}
               </div>
               {item.requires_photo && <Camera size={14} className="text-amber-500 shrink-0" />}
@@ -109,26 +109,40 @@ export default function TaskDetailClient({
           )}
         </div>
         {attachments.length === 0 ? (
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-[#AEAEB2]">
             {task.requires_photo ? 'Bu görev fotoğraf olmadan kapatılamaz.' : 'Henüz ek yok.'}
           </p>
         ) : (
+          <>
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
             {attachments.map(a => (
               <a key={a.id} href={a.url} target="_blank" rel="noreferrer"
-                 className="block rounded-xl overflow-hidden border border-slate-200 bg-slate-50 aspect-square">
+                 className={`relative block rounded-xl overflow-hidden border bg-slate-50 aspect-square ${
+                   canReview && a.ai_verdict === 'suspicious' ? 'border-amber-400 ring-2 ring-amber-200' : 'border-slate-200'}`}>
                 {a.mime_type?.startsWith('image/') && a.url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={a.url} alt={a.file_name} className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-2">
+                  <div className="w-full h-full flex flex-col items-center justify-center text-[#AEAEB2] p-2">
                     <Paperclip size={18} />
                     <span className="text-[10px] mt-1 text-center break-all line-clamp-2">{a.file_name}</span>
                   </div>
                 )}
+                {canReview && a.ai_verdict === 'suspicious' && (
+                  <span className="absolute top-1 right-1 bg-amber-400 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5">⚠️</span>
+                )}
               </a>
             ))}
           </div>
+          {canReview && attachments.some(a => a.ai_verdict === 'suspicious') && (
+            <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-[13px] text-amber-800">
+              ⚠️ <b>Yapay zeka kontrolü önerdi:</b>{' '}
+              {attachments.filter(a => a.ai_verdict === 'suspicious').map(a => a.ai_note).filter(Boolean).join(' · ')
+                || 'İşaretli fotoğraflar göreve uygun görünmüyor olabilir.'}{' '}
+              Son karar sizindir.
+            </div>
+          )}
+          </>
         )}
       </section>
 
@@ -139,7 +153,7 @@ export default function TaskDetailClient({
           {notes.map(n => (
             <li key={n.id} className="rounded-xl bg-slate-50 px-3 py-2">
               <p className="text-sm whitespace-pre-wrap">{n.body}</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">
+              <p className="text-[11px] text-[#AEAEB2] mt-0.5">
                 {n.profiles?.full_name} · {fmtDate(n.created_at)}
               </p>
             </li>
@@ -179,7 +193,7 @@ export default function TaskDetailClient({
         </div>
       )}
       {task.type === 'checklist' && !allItemsDone && !finished && !inReview && (
-        <p className="text-xs text-slate-400 text-center -mt-2">Görevi kapatmak için önce tüm maddeleri tamamlayın.</p>
+        <p className="text-xs text-[#AEAEB2] text-center -mt-2">Görevi kapatmak için önce tüm maddeleri tamamlayın.</p>
       )}
 
       {blockOpen && (

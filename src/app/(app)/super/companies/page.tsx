@@ -24,8 +24,8 @@ export default async function CompaniesPage() {
 
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8">
-      <h1 className="text-2xl font-bold tracking-tight mb-1">Şirketler</h1>
-      <p className="text-sm text-slate-500 mb-6">
+      <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-1">Şirketler</h1>
+      <p className="text-sm text-[#8E8E93] mb-6">
         Bir şirkete girerek uygulamayı orada tam yetkiyle kullanabilirsiniz.
         Yeni şirket eklediğinizde Operasyon, Satış, Üretim ve Yönetim departmanları hazır gelir.
       </p>
@@ -44,7 +44,7 @@ export default async function CompaniesPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="font-semibold truncate">{c.name}</p>
-                <p className="text-xs text-slate-400">{counts[c.id] ?? 0} kullanıcı</p>
+                <p className="text-xs text-[#AEAEB2]">{counts[c.id] ?? 0} kullanıcı</p>
               </div>
             </div>
             <div className="mt-4">

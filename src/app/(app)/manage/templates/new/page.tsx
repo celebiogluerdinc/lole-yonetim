@@ -17,8 +17,8 @@ export default async function NewTemplatePage() {
 
   return (
     <main className="max-w-2xl mx-auto p-4 md:p-8">
-      <h1 className="text-2xl font-bold tracking-tight mb-6">Yeni Şablon</h1>
-      <NewTemplateForm departments={departments as any} />
+      <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-6">Yeni Şablon</h1>
+      <NewTemplateForm departments={departments as any} aiAvailable={!!process.env.ANTHROPIC_API_KEY} />
     </main>
   );
 }

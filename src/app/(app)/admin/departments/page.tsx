@@ -25,7 +25,7 @@ export default async function DepartmentsPage() {
 
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8">
-      <h1 className="text-2xl font-bold tracking-tight mb-6">Departmanlar</h1>
+      <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-6">Departmanlar</h1>
 
       <NewDepartmentForm />
 
@@ -33,16 +33,16 @@ export default async function DepartmentsPage() {
         {(depts ?? []).map(d => (
           <div key={d.id} className="card p-5">
             <h3 className="font-semibold flex items-center gap-2">
-              <Building2 size={16} className="text-brand-500" />
+              <Building2 size={16} className="text-ios-blue" />
               {d.name}
-              {d.is_preset && <span className="badge bg-slate-100 text-slate-500">Hazır</span>}
+              {d.is_preset && <span className="badge bg-slate-100 text-[#8E8E93]">Hazır</span>}
             </h3>
             <div className="mt-3 space-y-1 text-sm">
-              <p className="text-slate-500">
+              <p className="text-[#8E8E93]">
                 <span className="font-medium text-slate-700">Müdür:</span>{' '}
                 {byDept[d.id]?.managers.join(', ') || '—'}
               </p>
-              <p className="text-slate-500">
+              <p className="text-[#8E8E93]">
                 <span className="font-medium text-slate-700">Üyeler:</span>{' '}
                 {byDept[d.id]?.members.join(', ') || '—'}
               </p>
@@ -50,7 +50,7 @@ export default async function DepartmentsPage() {
           </div>
         ))}
       </div>
-      <p className="text-xs text-slate-400 mt-4">
+      <p className="text-xs text-[#AEAEB2] mt-4">
         Üyelik ve müdür atamaları Kullanıcılar sayfasından, kullanıcı oluştururken yapılır.
       </p>
     </main>
