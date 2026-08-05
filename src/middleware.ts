@@ -23,15 +23,25 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  // Fast path: validate the JWT locally (ES256 + cached JWKS — no network).
+  // Fallback: full getUser() round-trip, which also refreshes expired sessions.
+  let authed = false;
+  try {
+    const { data } = await (supabase.auth as any).getClaims();
+    authed = !!data?.claims;
+  } catch { /* older client or opaque token — fall through */ }
+  if (!authed) {
+    const { data: { user } } = await supabase.auth.getUser();
+    authed = !!user;
+  }
 
   const isLogin = request.nextUrl.pathname.startsWith('/login');
-  if (!user && !isLogin) {
+  if (!authed && !isLogin) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
-  if (user && isLogin) {
+  if (authed && isLogin) {
     const url = request.nextUrl.clone();
     url.pathname = '/home';
     return NextResponse.redirect(url);
