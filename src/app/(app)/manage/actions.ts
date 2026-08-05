@@ -16,7 +16,7 @@ const TaskSchema = z.object({
   title: z.string().min(2).max(200),
   description: z.string().max(2000).optional().default(''),
   type: z.enum(['task', 'checklist']),
-  department_id: z.string().uuid(),
+  department_id: z.string().min(1), // uuid OR '__all__' (company-wide, admins)
   due_at: z.string().min(1),
   priority: z.enum(['low', 'normal', 'high', 'urgent']),
   requires_photo: z.boolean(),
@@ -98,63 +98,88 @@ export async function createTask(formData: FormData): Promise<{ error?: string }
   const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin (Şirketler sayfası).' };
 
-  const allowed =
-    profile.role === 'super_admin' || profile.role === 'admin' ||
-    managedDepartmentIds.includes(input.department_id);
-  if (!allowed) return { error: 'Bu departmana görev atama yetkiniz yok.' };
-
-  const { dates, rruleStr } = buildOccurrences(input);
-  let parentId: string | null = null;
-
-  for (const d of dates) {
-    const { data: task, error }: { data: any; error: any } = await supabase.from('tasks').insert({
-      company_id: companyId,
-      department_id: input.department_id,
-      title: input.title,
-      description: input.description || null,
-      type: input.type,
-      created_by: profile.id,
-      due_at: d.toISOString(),
-      priority: input.priority,
-      requires_photo: input.requires_photo,
-      requires_approval: input.requires_approval,
-      recurrence_rule: rruleStr,
-      parent_recurring_id: parentId
-    }).select().single();
-    if (error) return { error: error.message };
-    if (!parentId) parentId = task.id;
-
-    await supabase.from('task_assignees').insert(
-      input.assignees.map(uid => ({ task_id: task.id, user_id: uid }))
-    );
-    if (input.items.length) {
-      await supabase.from('checklist_items').insert(
-        input.items.map((title, i) => ({ task_id: task.id, title, position: i }))
-      );
-    }
-    await supabase.from('notifications').insert(
-      input.assignees.map(uid => ({
-        company_id: companyId, user_id: uid, type: 'task_assigned',
-        payload: { task_id: task.id, title: input.title, due_at: d.toISOString() }
-      }))
-    );
-    if (dates.indexOf(d) === 0) {
-      pushToUsers(input.assignees, {
-        title: '📋 Size yeni görev atandı',
-        body: input.title,
-        url: `/tasks/${task.id}`
-      }).catch(() => {});
-    }
+  // '__all__' → company-wide task (admins only)
+  const isCompanyWide = input.department_id === '__all__';
+  const deptId = isCompanyWide ? null : input.department_id;
+  if (!isCompanyWide && !z.string().uuid().safeParse(input.department_id).success) {
+    return { error: 'Geçersiz departman seçimi.' };
   }
 
-  await supabase.from('activity_log').insert({
-    company_id: companyId, actor_id: profile.id, entity_type: 'task',
-    entity_id: parentId, action: 'created',
-    meta: { title: input.title, occurrences: dates.length }
-  });
+  const allowed = isCompanyWide
+    ? ['super_admin', 'admin'].includes(profile.role)
+    : profile.role === 'super_admin' || profile.role === 'admin' ||
+      managedDepartmentIds.includes(input.department_id);
+  if (!allowed) {
+    return { error: isCompanyWide
+      ? 'Tüm şirkete görev atamayı yalnızca adminler yapabilir.'
+      : 'Bu departmana görev atama yetkiniz yok.' };
+  }
+
+  const { dates, rruleStr } = buildOccurrences(input);
+
+  // BATCH insert: 1 tasks insert + 1 assignees + 1 items + 1 notifications
+  // regardless of how many recurring occurrences — fast even for long series.
+  const taskRows = dates.map(d => ({
+    company_id: companyId,
+    department_id: deptId,
+    title: input.title,
+    description: input.description || null,
+    type: input.type,
+    created_by: profile.id,
+    due_at: d.toISOString(),
+    priority: input.priority,
+    requires_photo: input.requires_photo,
+    requires_approval: input.requires_approval,
+    recurrence_rule: rruleStr
+  }));
+
+  const { data: created, error } = await supabase
+    .from('tasks').insert(taskRows).select('id, due_at');
+  if (error) return { error: error.message };
+  const tasks = created ?? [];
+  const parentId = tasks[0]?.id ?? null;
+
+  const assigneeRows = tasks.flatMap((t: any) =>
+    input.assignees.map(uid => ({ task_id: t.id, user_id: uid })));
+  const itemRows = input.items.length
+    ? tasks.flatMap((t: any) =>
+        input.items.map((title, i) => ({ task_id: t.id, title, position: i })))
+    : [];
+  const notifRows = tasks.flatMap((t: any) =>
+    input.assignees.map(uid => ({
+      company_id: companyId, user_id: uid, type: 'task_assigned',
+      payload: { task_id: t.id, title: input.title, due_at: t.due_at }
+    })));
+
+  const sideEffects: any[] = [
+    supabase.from('task_assignees').insert(assigneeRows),
+    supabase.from('notifications').insert(notifRows),
+    supabase.from('activity_log').insert({
+      company_id: companyId, actor_id: profile.id, entity_type: 'task',
+      entity_id: parentId, action: 'created',
+      meta: { title: input.title, occurrences: dates.length, company_wide: isCompanyWide }
+    })
+  ];
+  if (itemRows.length) sideEffects.push(supabase.from('checklist_items').insert(itemRows));
+  if (tasks.length > 1) {
+    sideEffects.push(
+      supabase.from('tasks').update({ parent_recurring_id: parentId })
+        .in('id', tasks.slice(1).map((t: any) => t.id))
+    );
+  }
+  const results = await Promise.all(sideEffects);
+  const sideErr = results.find(r => r?.error);
+  if (sideErr?.error) return { error: sideErr.error.message };
+
+  pushToUsers(input.assignees, {
+    title: '📋 Size yeni görev atandı',
+    body: input.title,
+    url: parentId ? `/tasks/${parentId}` : '/home'
+  }).catch(() => {});
 
   revalidatePath('/home');
-  redirect('/home?tab=all');
+  revalidatePath('/manage/tasks');
+  redirect('/manage/tasks');
 }
 
 const TemplateSchema = z.object({

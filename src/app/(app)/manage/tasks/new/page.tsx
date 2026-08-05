@@ -35,6 +35,7 @@ export default async function NewTaskPage() {
         people={(people ?? []) as any}
         memberships={(memberships ?? []) as any}
         aiAvailable={!!process.env.ANTHROPIC_API_KEY}
+        isAdmin={['super_admin', 'admin'].includes(profile.role)}
       />
     </main>
   );

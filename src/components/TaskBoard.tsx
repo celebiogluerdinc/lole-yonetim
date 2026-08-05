@@ -1,11 +1,15 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
-  Plus, Search, Camera, ClipboardList, ShieldCheck, ChevronRight, Flag
+  Plus, Search, Camera, ClipboardList, ShieldCheck, ChevronRight, Flag,
+  CheckCheck, Ban
 } from 'lucide-react';
 import { TZ } from '@/lib/utils';
+import { managerSetTaskStatus } from '@/app/(app)/tasks/actions';
+import AutoRefresh from '@/components/AutoRefresh';
 
 interface Row {
   id: string; title: string; type: string; status: string; priority: string;
@@ -47,24 +51,46 @@ const tr = (s: string) => s.toLocaleLowerCase('tr-TR');
 export default function TaskBoard({
   rows, departments, initialFilter = 'active'
 }: { rows: Row[]; departments: { id: string; name: string }[]; initialFilter?: string }) {
+  const router = useRouter();
+  const [, startBg] = useTransition();
   const [filter, setFilter] = useState<string>(
     FILTERS.some(f => f.key === initialFilter) ? initialFilter : 'active'
   );
   const [dept, setDept] = useState<string>('');
   const [q, setQ] = useState('');
+  // optimistic status overrides — quick actions feel instant
+  const [override, setOverride] = useState<Record<string, string>>({});
+  const [actionErr, setActionErr] = useState<string | null>(null);
+
+  function quickSet(id: string, status: 'completed' | 'cancelled') {
+    setActionErr(null);
+    const prev = override[id];
+    setOverride(o => ({ ...o, [id]: status })); // instant
+    startBg(async () => {
+      const r = await managerSetTaskStatus(id, status);
+      if (r?.error) {
+        setOverride(o => ({ ...o, [id]: prev ?? '' }));
+        setActionErr(r.error);
+      } else {
+        router.refresh();
+      }
+    });
+  }
+
+  const effRow = (r: Row) => override[r.id] || eff(r);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: rows.length, active: 0 };
     for (const r of rows) {
-      const e = eff(r);
+      const e = effRow(r);
       c[e] = (c[e] ?? 0) + 1;
       if (!['completed', 'cancelled'].includes(e)) c.active++;
     }
     return c;
-  }, [rows]);
+  }, [rows, override]);
 
   const filtered = useMemo(() => rows.filter(r => {
-    const e = eff(r);
+    const e = effRow(r);
     if (filter === 'active' && ['completed', 'cancelled'].includes(e)) return false;
     if (!['active', 'all'].includes(filter) && e !== filter) return false;
     if (dept && r.department_id !== dept) return false;
@@ -73,7 +99,7 @@ export default function TaskBoard({
       if (!hay.includes(tr(q))) return false;
     }
     return true;
-  }), [rows, filter, dept, q]);
+  }), [rows, filter, dept, q, override]);
 
   const fmtDue = (iso: string | null) => iso
     ? new Date(iso).toLocaleString('tr-TR', { timeZone: TZ, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -81,17 +107,23 @@ export default function TaskBoard({
 
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-8 space-y-5">
+      <AutoRefresh seconds={15} />
       <header className="px-1 flex items-end justify-between gap-3">
         <div>
           <h1 className="text-[28px] leading-tight font-bold tracking-tight">Görevler</h1>
-          <p className="text-[14px] text-[#8E8E93]">
-            Verilen tüm iş akışları · {counts.active} aktif / {rows.length} toplam
+          <p className="text-[14px] text-[#8E8E93] flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-ios-green animate-pulse inline-block" />
+            Canlı takip · {counts.active} aktif / {rows.length} toplam
           </p>
         </div>
         <Link href="/manage/tasks/new" className="btn-primary shrink-0">
           <Plus size={16} /> Yeni Görev
         </Link>
       </header>
+
+      {actionErr && (
+        <p className="text-[13px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2">{actionErr}</p>
+      )}
 
       {/* Status filter chips with counts */}
       <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-1">
@@ -139,7 +171,7 @@ export default function TaskBoard({
           </div>
         )}
         {filtered.map(r => {
-          const e = eff(r);
+          const e = effRow(r);
           const badge = BADGE[e] ?? BADGE.open;
           const overdue = e === 'overdue';
           return (
@@ -175,6 +207,24 @@ export default function TaskBoard({
                   <p className="text-[12px] text-ios-red mt-1 truncate">🚧 {r.blocked_reason}</p>
                 )}
               </div>
+              {!['completed', 'cancelled'].includes(e) && (
+                <span className="flex gap-1 shrink-0" onClick={ev => { ev.preventDefault(); ev.stopPropagation(); }}>
+                  <button
+                    title="Görevi bitir"
+                    onClick={() => quickSet(r.id, 'completed')}
+                    className="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-300 flex items-center justify-center hover:bg-emerald-500/30 active:scale-90 transition-all"
+                  >
+                    <CheckCheck size={15} />
+                  </button>
+                  <button
+                    title="Görevi iptal et"
+                    onClick={() => { if (window.confirm(`"${r.title}" iptal edilsin mi?`)) quickSet(r.id, 'cancelled'); }}
+                    className="w-8 h-8 rounded-full bg-rose-500/15 text-rose-300 flex items-center justify-center hover:bg-rose-500/30 active:scale-90 transition-all"
+                  >
+                    <Ban size={14} />
+                  </button>
+                </span>
+              )}
               <span className={`badge shrink-0 ${badge.cls}`}>{badge.label}</span>
               <ChevronRight size={15} className="text-[#C7C7CC] shrink-0" />
             </Link>

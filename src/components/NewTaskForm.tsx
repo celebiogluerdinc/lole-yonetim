@@ -19,8 +19,8 @@ const WEEKDAYS = [
 const tr = (s: string) => s.toLocaleLowerCase('tr-TR');
 
 export default function NewTaskForm({
-  departments, people, memberships, aiAvailable = false
-}: { departments: Dept[]; people: Person[]; memberships: Membership[]; aiAvailable?: boolean }) {
+  departments, people, memberships, aiAvailable = false, isAdmin = false
+}: { departments: Dept[]; people: Person[]; memberships: Membership[]; aiAvailable?: boolean; isAdmin?: boolean }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [type, setType] = useState<'task' | 'checklist'>('task');
@@ -33,10 +33,15 @@ export default function NewTaskForm({
   const [suggestPending, startSuggest] = useTransition();
 
   const deptPeople = useMemo(() => {
+    if (deptId === '__all__') return people; // tüm şirket
     const ids = new Set(memberships.filter(m => m.department_id === deptId).map(m => m.user_id));
     const inDept = people.filter(p => ids.has(p.id));
     return inDept.length ? inDept : people;
   }, [deptId, people, memberships]);
+
+  function setAllAssignees(form: HTMLFormElement | null, checked: boolean) {
+    form?.querySelectorAll<HTMLInputElement>('input[name="assignees"]').forEach(cb => { cb.checked = checked; });
+  }
 
   function applyDraft(d: any) {
     setDraft(d);
@@ -129,6 +134,7 @@ export default function NewTaskForm({
               <label className="label">Departman *</label>
               <select name="department_id" required value={deptId}
                 onChange={e => setDeptId(e.target.value)} className="input">
+                {isAdmin && <option value="__all__">🏢 Tüm Şirket (tüm departmanlar)</option>}
                 {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
@@ -149,9 +155,16 @@ export default function NewTaskForm({
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
               <label className="label !mb-0">Atanacak kişiler *</label>
-              {aiAvailable && (
+              <span className="flex items-center gap-3">
+              <button type="button"
+                onClick={(e) => setAllAssignees((e.currentTarget as HTMLButtonElement).form, true)}
+                className="text-[13px] font-semibold text-ios-blue">Tümünü Seç</button>
+              <button type="button"
+                onClick={(e) => setAllAssignees((e.currentTarget as HTMLButtonElement).form, false)}
+                className="text-[13px] text-[#8E8E93]">Temizle</button>
+              {aiAvailable && deptId !== '__all__' && (
                 <button
                   type="button"
                   disabled={suggestPending}
@@ -181,6 +194,7 @@ export default function NewTaskForm({
                   {suggestPending ? 'Hesaplanıyor…' : 'Kime verelim?'}
                 </button>
               )}
+              </span>
             </div>
             {suggestion && (
               <p className="text-[13px] text-[#9F9CFF] bg-[#5E5CE6]/[0.18] rounded-xl px-3 py-2 mb-2">

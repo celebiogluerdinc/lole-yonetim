@@ -2,12 +2,12 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Camera, Paperclip, Send, AlertTriangle, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Check, Camera, Paperclip, Send, AlertTriangle, ThumbsUp, ThumbsDown, Ban, CheckCheck } from 'lucide-react';
 import type { Task, ChecklistItem } from '@/lib/types';
 import { fmtDate } from '@/lib/utils';
 import {
   toggleChecklistItem, completeTask, blockTask, reviewTask,
-  uploadAttachment, addTaskNote
+  uploadAttachment, addTaskNote, managerSetTaskStatus
 } from '@/app/(app)/tasks/actions';
 
 interface Att { id: string; file_name: string; mime_type: string | null; url?: string; created_at: string; checklist_item_id: string | null; ai_verdict?: string | null; ai_note?: string | null; }
@@ -27,9 +27,27 @@ export default function TaskDetailClient({
   const fileRef = useRef<HTMLInputElement>(null);
   const noteRef = useRef<HTMLFormElement>(null);
 
+  // optimistic checklist state — ticks render instantly, server syncs in background
+  const [itemOverride, setItemOverride] = useState<Record<string, boolean>>({});
+  const itemDone = (i: ChecklistItem) => itemOverride[i.id] ?? i.is_done;
+
   const finished = ['completed', 'cancelled'].includes(task.status);
   const inReview = task.status === 'pending_review';
-  const allItemsDone = items.length === 0 || items.every(i => i.is_done);
+  const allItemsDone = items.length === 0 || items.every(i => itemDone(i));
+
+  function onToggleItem(item: ChecklistItem) {
+    const next = !itemDone(item);
+    setItemOverride(o => ({ ...o, [item.id]: next })); // instant
+    start(async () => {
+      const r = await toggleChecklistItem(item.id, next);
+      if (r?.error) {
+        setItemOverride(o => ({ ...o, [item.id]: !next })); // revert
+        setError(r.error === 'photo_required' ? 'Bu madde için önce fotoğraf eklemelisiniz.' : r.error);
+      } else {
+        router.refresh();
+      }
+    });
+  }
 
   const run = (fn: () => Promise<any>) =>
     start(async () => {
@@ -55,21 +73,21 @@ export default function TaskDetailClient({
         <section className="card divide-y divide-white/[0.08]">
           <div className="p-4 pb-3">
             <h2 className="font-semibold text-sm text-[#D1D1D6]">
-              Checklist — {items.filter(i => i.is_done).length}/{items.length}
+              Checklist — {items.filter(i => itemDone(i)).length}/{items.length}
             </h2>
           </div>
           {items.map(item => (
             <div key={item.id} className="flex items-center gap-3 px-4 py-3">
               <button
-                disabled={pending || finished || inReview}
-                onClick={() => run(() => toggleChecklistItem(item.id, !item.is_done))}
-                className={`tick ${item.is_done ? 'tick-done' : ''}`}
-                aria-label={item.is_done ? 'Geri al' : 'Tamamla'}
+                disabled={finished || inReview}
+                onClick={() => onToggleItem(item)}
+                className={`tick ${itemDone(item) ? 'tick-done' : ''}`}
+                aria-label={itemDone(item) ? 'Geri al' : 'Tamamla'}
               >
-                {item.is_done && <Check size={14} strokeWidth={3} />}
+                {itemDone(item) && <Check size={14} strokeWidth={3} />}
               </button>
               <div className="flex-1 min-w-0">
-                <p className={`text-sm ${item.is_done ? 'line-through text-[#AEAEB2]' : ''}`}>{item.title}</p>
+                <p className={`text-sm ${itemDone(item) ? 'line-through text-[#AEAEB2]' : ''}`}>{item.title}</p>
                 {item.is_done && item.done_at && (
                   <p className="text-[11px] text-[#AEAEB2]">{fmtDate(item.done_at)}</p>
                 )}
@@ -241,6 +259,30 @@ export default function TaskDetailClient({
         <p className="text-sm text-center text-amber-300 bg-amber-500/10 rounded-xl py-3">
           ⏳ Yönetici onayı bekleniyor.
         </p>
+      )}
+
+      {/* Manager controls: finish / cancel any in-scope task */}
+      {canReview && !finished && !inReview && (
+        <div className="flex gap-2">
+          <button
+            disabled={pending}
+            onClick={() => run(() => managerSetTaskStatus(task.id, 'completed'))}
+            className="btn-outline flex-1 !text-emerald-300"
+          >
+            <CheckCheck size={15} /> Görevi Bitir (yönetici)
+          </button>
+          <button
+            disabled={pending}
+            onClick={() => {
+              if (window.confirm('Bu görev iptal edilsin mi?')) {
+                run(() => managerSetTaskStatus(task.id, 'cancelled'));
+              }
+            }}
+            className="btn-outline flex-1 !text-rose-300"
+          >
+            <Ban size={15} /> İptal Et
+          </button>
+        </div>
       )}
     </div>
   );

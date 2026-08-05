@@ -6,6 +6,7 @@ import type { Task } from '@/lib/types';
 import TaskRow from '@/components/TaskRow';
 import NotesPanel from '@/components/NotesPanel';
 import LiveClock from '@/components/LiveClock';
+import AutoRefresh from '@/components/AutoRefresh';
 import {
   CalendarDays, CalendarClock, Inbox, AlertCircle, Flag, CheckCircle2, Pin,
   ShieldQuestion, OctagonAlert, ChevronRight
@@ -136,6 +137,7 @@ export default async function HomePage({
 
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8 space-y-6">
+      <AutoRefresh seconds={30} />
       {/* User card + live clock */}
       <header className="card p-5 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3.5 min-w-0">
