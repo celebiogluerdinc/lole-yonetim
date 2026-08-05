@@ -9,16 +9,18 @@ export const dynamic = 'force-dynamic';
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { supabase, profile, companyId } = await getCtx();
 
-  let companyName = 'Lole Yönetim';
-  const [companyRes, { count: unreadCount }] = await Promise.all([
+  const [companyRes, { count: unreadCount }, appNameRes] = await Promise.all([
     companyId
       ? supabase.from('companies').select('name').eq('id', companyId).maybeSingle()
       : Promise.resolve({ data: null } as any),
     supabase.from('notifications')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', profile.id)
-      .is('read_at', null)
+      .is('read_at', null),
+    supabase.from('app_settings').select('value').eq('key', 'app_name').maybeSingle()
   ]);
+  const appName = appNameRes?.data?.value ?? 'Lole Yönetim';
+  let companyName = appName;
   if (companyRes?.data) companyName = companyRes.data.name;
   else if (profile.role === 'super_admin') companyName = 'Tüm Şirketler';
   const unread = unreadCount ?? 0;
@@ -41,6 +43,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/manage/templates', label: 'Şablonlar', icon: 'template', show: isManagerRole, badge: 0 },
     { href: '/admin/users', label: 'Kullanıcılar', icon: 'users', show: isAdminRole, badge: 0 },
     { href: '/admin/departments', label: 'Departmanlar', icon: 'building', show: isAdminRole, badge: 0 },
+    { href: '/admin/settings', label: 'Yönetim Paneli', icon: 'settings', show: isAdminRole, badge: 0 },
     { href: '/super/companies', label: 'Şirketler', icon: 'landmark', show: profile.role === 'super_admin', badge: 0 }
   ] as const).filter(n => n.show) as unknown as { href: string; label: string; icon: IconName; show: boolean; badge: number }[];
 
@@ -50,11 +53,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <aside className="hidden md:flex w-60 flex-col border-r border-white/[0.08] bg-[#141416] p-4 sticky top-0 h-dvh">
         <div className="flex items-center gap-2.5 px-2 mb-6">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-white flex items-center justify-center font-bold shadow-sm">
-            L
+            {appName[0]?.toUpperCase() ?? 'L'}
           </div>
           <div className="min-w-0">
             <p className="font-semibold text-sm leading-tight truncate">{companyName}</p>
-            <p className="text-xs text-[#8E8E93]">Lole Yönetim</p>
+            <p className="text-xs text-[#8E8E93]">{appName}</p>
           </div>
         </div>
         <nav className="flex-1 space-y-1">

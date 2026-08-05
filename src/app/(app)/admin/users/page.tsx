@@ -1,8 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getCtx } from '@/lib/auth';
-import { ROLE_LABEL } from '@/lib/utils';
 import NewUserForm from '@/components/NewUserForm';
-import UserActiveToggle from '@/components/UserActiveToggle';
+import UserManage, { type ManagedUser } from '@/components/UserManage';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,20 +22,30 @@ export default async function UsersPage() {
       : Promise.resolve({ data: [] } as any)
   ]);
 
-  const deptName: Record<string, string> = {};
-  for (const d of depts ?? []) deptName[d.id] = d.name;
-  const userDepts: Record<string, string[]> = {};
-  for (const m of memberships ?? []) {
-    if (deptName[m.department_id]) {
-      (userDepts[m.user_id] ??= []).push(
-        `${deptName[m.department_id]}${m.is_manager ? ' (Müdür)' : ''}`
-      );
-    }
-  }
+  const companyDepts = (depts ?? []).filter((d: any) => d.company_id === companyId);
+  const companyDeptIds = new Set(companyDepts.map((d: any) => d.id));
+
+  const rows: ManagedUser[] = (users ?? []).map((u: any) => {
+    const mine = (memberships ?? []).filter(
+      (m: any) => m.user_id === u.id && companyDeptIds.has(m.department_id)
+    );
+    return {
+      id: u.id,
+      full_name: u.full_name ?? '',
+      email: u.email ?? '',
+      role: u.role,
+      is_active: u.is_active,
+      memberIds: mine.filter((m: any) => !m.is_manager).map((m: any) => m.department_id),
+      managerIds: mine.filter((m: any) => m.is_manager).map((m: any) => m.department_id)
+    };
+  });
 
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8">
-      <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-6">Kullanıcılar</h1>
+      <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-1">Kullanıcılar</h1>
+      <p className="text-[14px] text-[#8E8E93] mb-6">
+        Düzenlemek için bir kullanıcıya dokunun — ad, rol, departman ve parola tek panelden.
+      </p>
 
       <NewUserForm
         departments={(depts ?? []) as any}
@@ -45,25 +54,9 @@ export default async function UsersPage() {
         isSuper={isSuper}
       />
 
-      <div className="card divide-y divide-white/[0.08] mt-6">
-        {(users ?? []).map(u => (
-          <div key={u.id} className="flex items-center gap-3 p-4">
-            <div className="w-9 h-9 rounded-full bg-ios-blue/10 text-ios-blue flex items-center justify-center text-sm font-bold shrink-0">
-              {(u.full_name || u.email)[0]?.toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className={`text-sm font-medium truncate ${u.is_active ? '' : 'text-[#AEAEB2] line-through'}`}>
-                {u.full_name || u.email}
-              </p>
-              <p className="text-xs text-[#AEAEB2] truncate">
-                {ROLE_LABEL[u.role]} · {u.email}
-                {userDepts[u.id]?.length ? ` · ${userDepts[u.id].join(', ')}` : ''}
-              </p>
-            </div>
-            {u.id !== profile.id && (
-              <UserActiveToggle userId={u.id} active={u.is_active} />
-            )}
-          </div>
+      <div className="card divide-y divide-white/[0.08] mt-6 overflow-hidden">
+        {rows.map(u => (
+          <UserManage key={u.id} user={u} departments={companyDepts as any} meId={profile.id} />
         ))}
       </div>
     </main>

@@ -101,6 +101,80 @@ export async function createUser(formData: FormData) {
   return { ok: true, login: email };
 }
 
+/**
+ * Admin edits an existing user: name, role, departments and (optionally) sets a NEW password.
+ * Existing passwords can never be displayed — they are stored irreversibly hashed.
+ */
+export async function updateUser(formData: FormData) {
+  const schema = z.object({
+    user_id: z.string().uuid(),
+    full_name: z.string().min(2).max(120),
+    role: z.enum(['admin', 'manager', 'staff']),
+    new_password: z.string().max(72).optional().default(''),
+    departments: z.array(z.string().uuid()).default([]),
+    manager_departments: z.array(z.string().uuid()).default([])
+  });
+  const parsed = schema.safeParse({
+    user_id: String(formData.get('user_id') ?? ''),
+    full_name: String(formData.get('full_name') ?? '').trim(),
+    role: String(formData.get('role') ?? 'staff'),
+    new_password: String(formData.get('new_password') ?? '').trim(),
+    departments: formData.getAll('departments').map(String),
+    manager_departments: formData.getAll('manager_departments').map(String)
+  });
+  if (!parsed.success) return { error: 'Ad en az 2 karakter olmalı.' };
+  const input = parsed.data;
+  if (input.new_password && input.new_password.length < 8) {
+    return { error: 'Yeni parola en az 8 karakter olmalı.' };
+  }
+
+  const { profile, companyId } = await getCtx();
+  requireAdmin(profile.role);
+
+  const admin = supabaseAdmin();
+  const { data: target } = await admin
+    .from('profiles').select('id, company_id, role').eq('id', input.user_id).maybeSingle();
+  if (!target) return { error: 'Kullanıcı bulunamadı.' };
+  if (profile.role !== 'super_admin' && target.company_id !== companyId) {
+    return { error: 'Bu kullanıcı sizin şirketinizde değil.' };
+  }
+  // kendi rolünü düşürmesin
+  const roleToSet = input.user_id === profile.id ? target.role : input.role;
+
+  const ops: any[] = [
+    admin.from('profiles').update({ full_name: input.full_name, role: roleToSet }).eq('id', input.user_id)
+  ];
+  if (input.new_password) {
+    ops.push(admin.auth.admin.updateUserById(input.user_id, { password: input.new_password }));
+  }
+  const results = await Promise.all(ops);
+  const failed = results.find((r: any) => r?.error);
+  if (failed?.error) return { error: failed.error.message };
+
+  // departman üyeliklerini yeniden kur (yalnızca hedef şirketin departmanları)
+  const { data: validDepts } = await admin
+    .from('departments').select('id').eq('company_id', target.company_id);
+  const valid = new Set((validDepts ?? []).map((d: any) => d.id));
+
+  await admin.from('department_members')
+    .delete().eq('user_id', input.user_id)
+    .in('department_id', Array.from(valid));
+
+  const memberships = new Map<string, boolean>();
+  for (const d of input.departments) if (valid.has(d)) memberships.set(d, false);
+  for (const d of input.manager_departments) if (valid.has(d)) memberships.set(d, true);
+  if (memberships.size) {
+    await admin.from('department_members').insert(
+      Array.from(memberships.entries()).map(([department_id, is_manager]) => ({
+        department_id, user_id: input.user_id, is_manager
+      }))
+    );
+  }
+
+  revalidatePath('/admin/users');
+  return { ok: true, password_changed: !!input.new_password };
+}
+
 export async function toggleUserActive(userId: string, active: boolean) {
   const { supabase, profile } = await getCtx();
   requireAdmin(profile.role);
@@ -123,6 +197,103 @@ export async function createDepartment(formData: FormData) {
   if (error) return { error: error.message };
   revalidatePath('/admin/departments');
   return { ok: true };
+}
+
+/** Rename a company — admin (own) or super admin (any). */
+export async function renameCompany(formData: FormData) {
+  const schema = z.object({ company_id: z.string().uuid(), name: z.string().min(2).max(120) });
+  const parsed = schema.safeParse({
+    company_id: String(formData.get('company_id') ?? ''),
+    name: String(formData.get('name') ?? '').trim()
+  });
+  if (!parsed.success) return { error: 'Şirket adı en az 2 karakter olmalı.' };
+
+  const { supabase, profile, companyId } = await getCtx();
+  requireAdmin(profile.role);
+  if (profile.role !== 'super_admin' && parsed.data.company_id !== companyId) {
+    return { error: 'Yalnızca kendi şirketinizin adını değiştirebilirsiniz.' };
+  }
+  const { error } = await supabase.from('companies')
+    .update({ name: parsed.data.name }).eq('id', parsed.data.company_id);
+  if (error) return { error: error.message };
+  revalidatePath('/admin/settings');
+  revalidatePath('/', 'layout');
+  return { ok: true };
+}
+
+/** Super admin sets the platform brand name shown across the app. */
+export async function setAppName(formData: FormData) {
+  const name = z.string().min(2).max(60).safeParse(String(formData.get('app_name') ?? '').trim());
+  if (!name.success) return { error: 'Uygulama adı en az 2 karakter olmalı.' };
+
+  const { supabase, profile } = await getCtx();
+  if (profile.role !== 'super_admin') return { error: 'Yalnızca süper admin uygulama adını değiştirebilir.' };
+
+  const { error } = await supabase.from('app_settings')
+    .upsert({ key: 'app_name', value: name.data, updated_at: new Date().toISOString() });
+  if (error) return { error: error.message };
+  revalidatePath('/', 'layout');
+  revalidatePath('/admin/settings');
+  return { ok: true };
+}
+
+/** Restore a JSON backup into the ACTIVE company (upsert by id). Photos/files are not included. */
+export async function restoreBackup(formData: FormData) {
+  const { profile, companyId } = await getCtx();
+  requireAdmin(profile.role);
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const file = formData.get('file') as File | null;
+  if (!file) return { error: 'Yedek dosyası seçilmedi.' };
+  if (file.size > 15 * 1024 * 1024) return { error: 'Yedek dosyası 15MB sınırını aşıyor.' };
+
+  let payload: any;
+  try {
+    payload = JSON.parse(await file.text());
+  } catch {
+    return { error: 'Dosya okunamadı — geçerli bir yedek JSON dosyası seçin.' };
+  }
+  if (payload?.meta?.company_id !== companyId) {
+    return { error: 'Bu yedek başka bir şirkete ait. Önce o şirkete geçin (Şirketler sayfası).' };
+  }
+
+  const admin = supabaseAdmin();
+  const counts: Record<string, number> = {};
+
+  // parent → child order; rows are upserted by primary key (id)
+  const order: [string, any[]][] = [
+    ['departments', payload.departments],
+    ['templates', payload.templates],
+    ['template_items', payload.template_items],
+    ['tasks', payload.tasks],
+    ['task_assignees', payload.task_assignees],
+    ['checklist_items', payload.checklist_items],
+    ['announcements', payload.announcements],
+    ['notes', payload.notes],
+    ['shifts', payload.shifts],
+    ['leave_requests', payload.leave_requests],
+    ['time_entries', payload.time_entries]
+  ];
+
+  for (const [table, rows] of order) {
+    if (!Array.isArray(rows) || rows.length === 0) continue;
+    // güvenlik: company_id taşıyan satırlar yalnızca aktif şirkete yazılır
+    const safe = rows.filter((r: any) => !('company_id' in r) || r.company_id === companyId);
+    for (let i = 0; i < safe.length; i += 500) {
+      const chunk = safe.slice(i, i + 500);
+      const { error } = await admin.from(table).upsert(chunk, { onConflict: 'id' });
+      if (error) return { error: `${table} geri yüklenirken hata: ${error.message}` };
+    }
+    counts[table] = safe.length;
+  }
+
+  await admin.from('activity_log').insert({
+    company_id: companyId, actor_id: profile.id, entity_type: 'backup',
+    action: 'restored', meta: counts
+  });
+
+  revalidatePath('/admin/settings');
+  return { ok: true, counts };
 }
 
 /** Super admin creates a new company (preset departments auto-created by trigger). */

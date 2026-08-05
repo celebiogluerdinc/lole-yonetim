@@ -1,18 +1,25 @@
 import { login } from './actions';
+import { supabaseServer } from '@/lib/supabase/server';
 
-export default function LoginPage({
+export default async function LoginPage({
   searchParams
 }: {
   searchParams: { error?: string };
 }) {
+  let appName = 'Lole Yönetim';
+  try {
+    const { data } = await supabaseServer()
+      .from('app_settings').select('value').eq('key', 'app_name').maybeSingle();
+    if (data?.value) appName = data.value;
+  } catch { /* tablo henüz yoksa varsayılan ad */ }
   return (
     <main className="min-h-dvh flex items-center justify-center p-6">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="mx-auto w-14 h-14 rounded-2xl bg-brand-500 text-white flex items-center justify-center text-2xl font-bold shadow-lg shadow-black/40">
-            L
+            {appName[0]?.toUpperCase() ?? 'L'}
           </div>
-          <h1 className="mt-4 text-2xl font-bold tracking-tight">Lole Yönetim</h1>
+          <h1 className="mt-4 text-2xl font-bold tracking-tight">{appName}</h1>
           <p className="text-sm text-[#8E8E93] mt-1">Hesabınızla giriş yapın</p>
         </div>
 

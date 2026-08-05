@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import {
   Home, Calendar, Megaphone, PlusSquare, LayoutTemplate,
   Users, Building2, Landmark, MessageCircle, Bell, BarChart3, Sparkles,
-  CalendarClock, Plane, Clock, ClipboardList, type LucideIcon
+  CalendarClock, Plane, Clock, ClipboardList, Settings, type LucideIcon
 } from 'lucide-react';
 
 const META: Record<string, { Icon: LucideIcon; color: string }> = {
@@ -24,6 +24,7 @@ const META: Record<string, { Icon: LucideIcon; color: string }> = {
   template: { Icon: LayoutTemplate, color: '#5856D6' },
   users: { Icon: Users, color: '#AF52DE' },
   building: { Icon: Building2, color: '#8E8E93' },
+  settings: { Icon: Settings, color: '#8E8E93' },
   landmark: { Icon: Landmark, color: '#FF9500' }
 };
 

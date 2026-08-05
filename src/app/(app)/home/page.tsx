@@ -9,8 +9,21 @@ import LiveClock from '@/components/LiveClock';
 import AutoRefresh from '@/components/AutoRefresh';
 import {
   CalendarDays, CalendarClock, Inbox, AlertCircle, Flag, CheckCircle2, Pin,
-  ShieldQuestion, OctagonAlert, ChevronRight
+  ShieldQuestion, OctagonAlert, ChevronRight, Users2
 } from 'lucide-react';
+
+const AVATAR_COLORS = ['#0A84FF', '#30D158', '#FF9F0A', '#BF5AF2', '#FF453A', '#5E5CE6', '#64D2FF'];
+const colorFor = (s: string) =>
+  AVATAR_COLORS[s.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
+
+function chatTime(iso: string) {
+  const d = new Date(iso);
+  const today = new Date().toLocaleDateString('tr-TR', { timeZone: TZ });
+  if (d.toLocaleDateString('tr-TR', { timeZone: TZ }) === today) {
+    return d.toLocaleTimeString('tr-TR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleDateString('tr-TR', { timeZone: TZ, day: 'numeric', month: 'short' });
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +50,7 @@ export default async function HomePage({
   const isManager = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
 
   // --- fetch everything this page needs in ONE parallel round ---
-  const [{ data: assigned }, panoRes, { data: notes }, flowRes] = await Promise.all([
+  const [{ data: assigned }, panoRes, { data: notes }, flowRes, convRes] = await Promise.all([
     supabase
       .from('task_assignees')
       .select('task_id, tasks(*, checklist_items(is_done))')
@@ -67,7 +80,14 @@ export default async function HomePage({
           .not('status', 'in', '("completed","cancelled")')
           .order('due_at', { ascending: true, nullsFirst: false })
           .limit(200)
-      : Promise.resolve({ data: null } as any)
+      : Promise.resolve({ data: null } as any),
+    companyId
+      ? supabase
+          .from('conversation_members')
+          .select('conversation_id, last_read_at, conversations!inner(id, type, name, company_id)')
+          .eq('user_id', profile.id)
+          .eq('conversations.company_id', companyId)
+      : Promise.resolve({ data: [] } as any)
   ]);
 
   // --- team workflow summary (managers) ---
@@ -88,6 +108,42 @@ export default async function HomePage({
     .map(t => ({ ...t, eff: effStatus(t) }))
     .filter(t => ['overdue', 'pending_review', 'blocked'].includes(t.eff))
     .slice(0, 6);
+
+  // --- recent conversations (top 3, with unread counts) ---
+  const convMemberships: any[] = convRes?.data ?? [];
+  const convIds = convMemberships.map((m: any) => m.conversation_id);
+  let chats: any[] = [];
+  if (convIds.length) {
+    const [{ data: allMembers }, { data: msgs }] = await Promise.all([
+      supabase
+        .from('conversation_members')
+        .select('conversation_id, user_id, profiles:user_id(full_name)')
+        .in('conversation_id', convIds),
+      supabase
+        .from('messages')
+        .select('conversation_id, sender_id, body, created_at')
+        .in('conversation_id', convIds)
+        .order('created_at', { ascending: false })
+        .limit(120)
+    ]);
+    chats = convMemberships.map((m: any) => {
+      const conv = m.conversations;
+      const members = (allMembers ?? []).filter((x: any) => x.conversation_id === conv.id);
+      const others = members.filter((x: any) => x.user_id !== profile.id);
+      const title = conv.type === 'group'
+        ? (conv.name ?? 'Grup')
+        : ((others[0] as any)?.profiles?.full_name ?? 'Sohbet');
+      const convMsgs = (msgs ?? []).filter((x: any) => x.conversation_id === conv.id);
+      const last = convMsgs[0];
+      const unread = convMsgs.filter((x: any) =>
+        x.sender_id !== profile.id && (!m.last_read_at || x.created_at > m.last_read_at)
+      ).length;
+      return { id: conv.id, type: conv.type, title, last, unread };
+    })
+      .filter(c => c.last)
+      .sort((a, b) => (b.last?.created_at ?? '').localeCompare(a.last?.created_at ?? ''))
+      .slice(0, 3);
+  }
 
   let myTasks: Task[] = (assigned ?? [])
     .map((r: any) => r.tasks)
@@ -244,6 +300,43 @@ export default async function HomePage({
           ))}
         </div>
       </section>
+
+      {/* Mesajlar */}
+      {chats.length > 0 && (
+        <section>
+          <div className="flex items-baseline justify-between pr-2">
+            <h2 className="section-title">Mesajlar</h2>
+            <Link href="/messages" className="text-[13px] text-ios-blue font-medium">Tümü</Link>
+          </div>
+          <div className="card divide-y divide-white/[0.08] overflow-hidden">
+            {chats.map((c: any) => (
+              <Link key={c.id} href={`/messages/${c.id}`}
+                className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors">
+                <span
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold shrink-0"
+                  style={{ backgroundColor: colorFor(c.title) }}
+                >
+                  {c.type === 'group' ? <Users2 size={17} /> : c.title[0]?.toUpperCase()}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="flex items-baseline justify-between gap-2">
+                    <p className="text-[15px] font-semibold truncate">{c.title}</p>
+                    <p className="text-[12px] text-[#8E8E93] shrink-0">{chatTime(c.last.created_at)}</p>
+                  </span>
+                  <p className="text-[13px] text-[#8E8E93] truncate">
+                    {c.last.sender_id === profile.id ? 'Siz: ' : ''}{c.last.body}
+                  </p>
+                </span>
+                {c.unread > 0 && (
+                  <span className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-ios-blue text-white text-[12px] font-semibold flex items-center justify-center shrink-0">
+                    {c.unread > 99 ? '99+' : c.unread}
+                  </span>
+                )}
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Pano */}
       {pano.length > 0 && (
