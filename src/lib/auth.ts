@@ -20,7 +20,11 @@ export interface Ctx {
  */
 export const getCtx = cache(async (): Promise<Ctx> => {
   const supabase = supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
+  // Middleware already validated & refreshed the token with auth.getUser() on
+  // this request — here we read the session locally from the cookie (no network
+  // round-trip), which shaves a full auth call off every page render.
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) redirect('/login');
 
   // profile + managed departments in parallel (one round trip of latency, not two)

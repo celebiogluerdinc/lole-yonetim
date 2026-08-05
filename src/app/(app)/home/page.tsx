@@ -35,7 +35,7 @@ export default async function HomePage({
   const [{ data: assigned }, panoRes, { data: notes }] = await Promise.all([
     supabase
       .from('task_assignees')
-      .select('task_id, tasks(*)')
+      .select('task_id, tasks(*, checklist_items(is_done))')
       .eq('user_id', profile.id),
     companyId
       ? supabase
@@ -60,18 +60,15 @@ export default async function HomePage({
     .map((r: any) => r.tasks)
     .filter(Boolean);
 
-  // checklist progress
-  const taskIds = myTasks.filter(t => t.type === 'checklist').map(t => t.id);
+  // checklist progress — embedded in the main query, no extra round-trip
   const progress: Record<string, { done: number; total: number }> = {};
-  if (taskIds.length) {
-    const { data: items } = await supabase
-      .from('checklist_items')
-      .select('task_id, is_done')
-      .in('task_id', taskIds);
-    for (const it of items ?? []) {
-      const p = (progress[it.task_id] ??= { done: 0, total: 0 });
-      p.total++;
-      if (it.is_done) p.done++;
+  for (const t of (assigned ?? []).map((r: any) => r.tasks).filter(Boolean)) {
+    const items: any[] = (t as any).checklist_items ?? [];
+    if (items.length) {
+      progress[t.id] = {
+        done: items.filter((i: any) => i.is_done).length,
+        total: items.length
+      };
     }
   }
 
