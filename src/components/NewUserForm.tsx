@@ -69,7 +69,8 @@ export default function NewUserForm({
           <label className="label">Kullanıcı adı veya e-posta *</label>
           <input name="identifier" required className="input" placeholder="ayse.yilmaz" />
           <p className="text-[11px] text-[#8E8E93] mt-1">
-            Sadece kullanıcı adı yazarsanız giriş <b>ad@lole.app</b> olur — e-posta gerekmez.
+            Sadece kullanıcı adı yazarsanız giriş adresi <b>kullaniciadi@lole.app</b> olur — e-posta gerekmez.
+            Türkçe harfler otomatik çevrilir (ör. &quot;ayşe.yılmaz&quot; → ayse.yilmaz); kullanıcı girişte ikisini de yazabilir.
           </p>
         </div>
         <div>

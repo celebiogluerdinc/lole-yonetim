@@ -10,6 +10,14 @@ export async function savePushSubscription(sub: {
 }) {
   const { supabase, profile } = await getCtx();
   if (!sub?.endpoint || !sub?.keys?.p256dh) return { error: 'Geçersiz abonelik.' };
+  // endpoint gerçek bir push servisi olmalı (SSRF koruması)
+  try {
+    const u = new URL(sub.endpoint);
+    const ipLike = /^\d+\.\d+\.\d+\.\d+$/.test(u.hostname) || u.hostname === 'localhost';
+    if (u.protocol !== 'https:' || ipLike) return { error: 'Geçersiz abonelik adresi.' };
+  } catch {
+    return { error: 'Geçersiz abonelik adresi.' };
+  }
   await supabase.from('push_subscriptions').upsert(
     {
       user_id: profile.id,

@@ -11,7 +11,7 @@ export const viewport: Viewport = {
   themeColor: '#1C1C1E',
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1
+  viewportFit: 'cover' // iOS: enables env(safe-area-inset-*) under the home indicator
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

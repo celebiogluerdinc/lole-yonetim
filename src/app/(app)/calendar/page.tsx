@@ -1,18 +1,24 @@
 import Link from 'next/link';
 import { getCtx } from '@/lib/auth';
-import { fmtDate, TZ, STATUS_COLOR, STATUS_LABEL } from '@/lib/utils';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { TZ, STATUS_COLOR, STATUS_LABEL } from '@/lib/utils';
+import { ChevronLeft, ChevronRight, CalendarClock, Plane } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
+
+const LEAVE_TR: Record<string, string> = {
+  annual: 'Yıllık izin', sick: 'Rapor', unpaid: 'Ücretsiz izin', other: 'İzin'
+};
 
 export default async function CalendarPage({
   searchParams
 }: { searchParams: { m?: string; scope?: string } }) {
-  const { supabase, profile, managedDepartmentIds } = await getCtx();
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
 
   const now = new Date();
-  const [y, m] = (searchParams.m ?? `${now.getFullYear()}-${now.getMonth() + 1}`)
-    .split('-').map(Number);
+  let [y, m] = (searchParams.m ?? '').split('-').map(Number);
+  if (!y || !m || m < 1 || m > 12 || y < 2000 || y > 2100) {
+    y = now.getFullYear(); m = now.getMonth() + 1; // geçersiz parametre → bu ay
+  }
   const monthStart = new Date(Date.UTC(y, m - 1, 1));
   const monthEnd = new Date(Date.UTC(y, m, 1));
   const prev = `${m === 1 ? y - 1 : y}-${m === 1 ? 12 : m - 1}`;
@@ -21,29 +27,72 @@ export default async function CalendarPage({
   const isManager = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
   const scope = isManager && searchParams.scope === 'team' ? 'team' : 'mine';
 
-  let tasks: any[] = [];
-  if (scope === 'mine') {
-    const { data } = await supabase
-      .from('task_assignees')
-      .select('tasks(*)')
-      .eq('user_id', profile.id);
-    tasks = (data ?? []).map((r: any) => r.tasks).filter(Boolean);
-  } else {
-    const { data } = await supabase.from('tasks').select('*');
-    tasks = data ?? [];
-  }
-  tasks = tasks
-    .filter(t => t.due_at && new Date(t.due_at) >= monthStart && new Date(t.due_at) < monthEnd)
-    .sort((a, b) => a.due_at.localeCompare(b.due_at));
+  // görevler + vardiyalar + onaylı izinler — tek takvimde
+  const monthStartIso = monthStart.toISOString();
+  const monthEndIso = monthEnd.toISOString();
+  const monthStartDate = monthStartIso.slice(0, 10);
+  const monthEndDate = monthEndIso.slice(0, 10);
 
-  // group by day
-  const byDay: Record<string, any[]> = {};
-  for (const t of tasks) {
-    const key = new Date(t.due_at).toLocaleDateString('tr-TR', {
-      timeZone: TZ, day: 'numeric', month: 'long', weekday: 'long'
-    });
-    (byDay[key] ??= []).push(t);
+  let tasksQ;
+  if (scope === 'mine') {
+    tasksQ = supabase.from('task_assignees').select('tasks(*)').eq('user_id', profile.id);
+  } else {
+    tasksQ = supabase.from('tasks').select('*')
+      .eq('company_id', companyId ?? '')
+      .gte('due_at', monthStartIso).lt('due_at', monthEndIso).limit(500);
   }
+  const shiftsQ = supabase.from('shifts')
+    .select('id, user_id, company_id, starts_at, ends_at, note, profiles:user_id(full_name)')
+    .gte('starts_at', monthStartIso).lt('starts_at', monthEndIso)
+    .order('starts_at').limit(500) as any;
+  const leaveQ = supabase.from('leave_requests')
+    .select('id, user_id, company_id, type, start_date, end_date, profiles:user_id(full_name)')
+    .eq('status', 'approved')
+    .lte('start_date', monthEndDate).gte('end_date', monthStartDate)
+    .limit(200) as any;
+
+  const [tasksRes, shiftsRes, leaveRes] = await Promise.all([tasksQ, shiftsQ, leaveQ]);
+
+  let tasks: any[] = scope === 'mine'
+    ? (tasksRes.data ?? []).map((r: any) => r.tasks).filter(Boolean)
+        .filter((t: any) => t.due_at && new Date(t.due_at) >= monthStart && new Date(t.due_at) < monthEnd)
+    : (tasksRes.data ?? []);
+  tasks.sort((a, b) => a.due_at.localeCompare(b.due_at));
+
+  let shifts: any[] = (shiftsRes.data ?? []);
+  let leaves: any[] = (leaveRes.data ?? []);
+  if (companyId) {
+    // süper adminde diğer şirketlerin kayıtları karışmasın
+    shifts = shifts.filter((s: any) => s.company_id === companyId);
+    leaves = leaves.filter((l: any) => l.company_id === companyId);
+    if (scope === 'team') tasks = tasks.filter((task: any) => task.company_id === companyId);
+  }
+  if (scope === 'mine') {
+    shifts = shifts.filter((s: any) => s.user_id === profile.id);
+    leaves = leaves.filter((l: any) => l.user_id === profile.id);
+  }
+
+  const dayKey = (iso: string) => new Date(iso).toLocaleDateString('tr-TR', {
+    timeZone: TZ, day: 'numeric', month: 'long', weekday: 'long'
+  });
+  const t = (iso: string) => new Date(iso).toLocaleTimeString('tr-TR', {
+    timeZone: TZ, hour: '2-digit', minute: '2-digit'
+  });
+
+  // group everything by day
+  type Entry = { kind: 'task' | 'shift' | 'leave'; sort: string; el: any };
+  const byDay: Record<string, Entry[]> = {};
+  for (const task of tasks) (byDay[dayKey(task.due_at)] ??= []).push({ kind: 'task', sort: task.due_at, el: task });
+  for (const s of shifts) (byDay[dayKey(s.starts_at)] ??= []).push({ kind: 'shift', sort: s.starts_at, el: s });
+  for (const l of leaves) {
+    // her izin gününü ay içinde ayrı satır olarak göster
+    const from = l.start_date < monthStartDate ? monthStartDate : l.start_date;
+    const to = l.end_date >= monthEndDate ? monthEndDate : l.end_date;
+    for (let d = new Date(`${from}T12:00:00Z`); d.toISOString().slice(0, 10) <= to && d < monthEnd; d = new Date(d.getTime() + 86400000)) {
+      (byDay[dayKey(d.toISOString())] ??= []).push({ kind: 'leave', sort: '00:00', el: l });
+    }
+  }
+  for (const k of Object.keys(byDay)) byDay[k].sort((a, b) => a.sort.localeCompare(b.sort));
 
   const monthLabel = monthStart.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
@@ -72,7 +121,9 @@ export default async function CalendarPage({
       )}
 
       {Object.keys(byDay).length === 0 && (
-        <div className="card p-10 text-center text-sm text-[#8E8E93]">Bu ay planlanmış görev yok.</div>
+        <div className="card p-10 text-center text-sm text-[#8E8E93]">
+          Bu ay planlanmış görev, vardiya veya izin yok.
+        </div>
       )}
 
       <div className="space-y-5">
@@ -80,20 +131,50 @@ export default async function CalendarPage({
           <section key={day}>
             <h2 className="text-sm font-semibold text-[#8E8E93] mb-2 capitalize">{day}</h2>
             <div className="card divide-y divide-white/[0.08]">
-              {list.map(t => (
-                <Link key={t.id} href={`/tasks/${t.id}`}
-                  className="flex items-center gap-3 p-3.5 hover:bg-[#1C1C1E]/[0.04] transition-colors">
-                  <span className="text-xs font-semibold text-ios-blue w-12 shrink-0">
-                    {new Date(t.due_at).toLocaleTimeString('tr-TR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  <span className={`flex-1 text-sm truncate ${t.status === 'completed' ? 'line-through text-[#AEAEB2]' : ''}`}>
-                    {t.title}
-                  </span>
-                  <span className={`badge ${STATUS_COLOR[t.status as keyof typeof STATUS_COLOR]}`}>
-                    {STATUS_LABEL[t.status as keyof typeof STATUS_LABEL]}
-                  </span>
-                </Link>
-              ))}
+              {list.map((e, i) => {
+                if (e.kind === 'task') {
+                  const task = e.el;
+                  return (
+                    <Link key={`t${task.id}-${i}`} href={`/tasks/${task.id}`}
+                      className="flex items-center gap-3 p-3.5 hover:bg-[#1C1C1E]/[0.04] transition-colors">
+                      <span className="text-xs font-semibold text-ios-blue w-12 shrink-0">{t(task.due_at)}</span>
+                      <span className={`flex-1 text-sm truncate ${task.status === 'completed' ? 'line-through text-[#AEAEB2]' : ''}`}>
+                        {task.title}
+                      </span>
+                      <span className={`badge ${STATUS_COLOR[task.status as keyof typeof STATUS_COLOR]}`}>
+                        {STATUS_LABEL[task.status as keyof typeof STATUS_LABEL]}
+                      </span>
+                    </Link>
+                  );
+                }
+                if (e.kind === 'shift') {
+                  const s = e.el;
+                  return (
+                    <div key={`s${s.id}-${i}`} className="flex items-center gap-3 p-3.5">
+                      <span className="text-xs font-semibold text-ios-orange w-12 shrink-0">{t(s.starts_at)}</span>
+                      <CalendarClock size={14} className="text-ios-orange shrink-0" />
+                      <span className="flex-1 text-sm truncate">
+                        Vardiya · {t(s.starts_at)}–{t(s.ends_at)}
+                        {scope === 'team' && s.profiles?.full_name ? ` · ${s.profiles.full_name}` : ''}
+                        {s.note ? ` · ${s.note}` : ''}
+                      </span>
+                      <Link href="/shifts" className="badge bg-amber-500/20 text-amber-300">Vardiya</Link>
+                    </div>
+                  );
+                }
+                const l = e.el;
+                return (
+                  <div key={`l${l.id}-${i}`} className="flex items-center gap-3 p-3.5">
+                    <span className="text-xs font-semibold text-[#30B0C7] w-12 shrink-0">Tüm gün</span>
+                    <Plane size={14} className="text-[#30B0C7] shrink-0" />
+                    <span className="flex-1 text-sm truncate">
+                      {LEAVE_TR[l.type] ?? 'İzin'}
+                      {scope === 'team' && l.profiles?.full_name ? ` · ${l.profiles.full_name}` : ''}
+                    </span>
+                    <Link href="/leave" className="badge bg-cyan-500/20 text-cyan-300">İzin</Link>
+                  </div>
+                );
+              })}
             </div>
           </section>
         ))}

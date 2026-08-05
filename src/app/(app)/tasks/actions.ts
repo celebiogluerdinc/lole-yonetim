@@ -271,18 +271,28 @@ export async function reviewTask(taskId: string, approve: boolean, note?: string
   return { ok: true };
 }
 
+const ALLOWED_MIME = new Set([
+  'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'image/gif',
+  'application/pdf'
+]);
+
 export async function uploadAttachment(formData: FormData) {
   const { supabase, profile } = await getCtx();
   const taskId = String(formData.get('task_id') ?? '');
   const itemId = String(formData.get('item_id') ?? '') || null;
   const file = formData.get('file') as File | null;
-  if (!file || !taskId) return { error: 'Dosya seçilmedi.' };
+  if (!file || !z.string().uuid().safeParse(taskId).success) return { error: 'Dosya seçilmedi.' };
+  if (itemId && !z.string().uuid().safeParse(itemId).success) return { error: 'Geçersiz madde.' };
   if (file.size > 10 * 1024 * 1024) return { error: 'Dosya 10MB sınırını aşıyor.' };
+  if (file.type && !ALLOWED_MIME.has(file.type)) {
+    return { error: 'Yalnızca fotoğraf (JPG/PNG/HEIC/WebP) ve PDF yüklenebilir.' };
+  }
 
   const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).maybeSingle();
   if (!task) return { error: 'Görev bulunamadı veya erişiminiz yok.' };
 
-  const ext = file.name.split('.').pop() || 'bin';
+  const ext = (file.name.split('.').pop() || 'bin')
+    .toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'bin';
   const path = `${task.company_id}/${taskId}/${crypto.randomUUID()}.${ext}`;
 
   const buf = Buffer.from(await file.arrayBuffer());
@@ -341,12 +351,14 @@ export async function uploadAttachment(formData: FormData) {
 export async function addTaskNote(formData: FormData) {
   const { supabase, profile } = await getCtx();
   const taskId = String(formData.get('task_id') ?? '');
-  const body = z.string().min(1).max(2000).parse(String(formData.get('body') ?? '').trim());
+  const bodyParsed = z.string().min(1).max(2000).safeParse(String(formData.get('body') ?? '').trim());
+  if (!bodyParsed.success) return { error: 'Not boş olamaz (en fazla 2000 karakter).' };
   const { data: task } = await supabase.from('tasks').select('id, company_id').eq('id', taskId).maybeSingle();
   if (!task) return { error: 'Görev bulunamadı.' };
-  await supabase.from('notes').insert({
-    company_id: task.company_id, author_id: profile.id, task_id: taskId, body
+  const { error } = await supabase.from('notes').insert({
+    company_id: task.company_id, author_id: profile.id, task_id: taskId, body: bodyParsed.data
   });
+  if (error) return { error: error.message };
   revalidatePath(`/tasks/${taskId}`);
   return { ok: true };
 }

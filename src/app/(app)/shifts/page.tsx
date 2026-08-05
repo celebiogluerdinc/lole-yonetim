@@ -9,9 +9,9 @@ export const dynamic = 'force-dynamic';
 
 function mondayOf(d: Date) {
   const x = new Date(d);
-  const day = (x.getDay() + 6) % 7;
-  x.setDate(x.getDate() - day);
-  x.setHours(0, 0, 0, 0);
+  const day = (x.getUTCDay() + 6) % 7;
+  x.setUTCDate(x.getUTCDate() - day);
+  x.setUTCHours(0, 0, 0, 0);
   return x;
 }
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -35,9 +35,13 @@ export default async function ShiftsPage({
   const isManager = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
   const view: 'week' | 'month' = searchParams.v === 'month' ? 'month' : 'week';
 
-  // ----- range -----
-  const anchorRaw = searchParams.w ? new Date(searchParams.w) : new Date();
-  const anchor = isNaN(anchorRaw.getTime()) ? new Date() : anchorRaw;
+  const todayKey = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+
+  // ----- range (all date math on UTC midnights of calendar dates) -----
+  const anchorRaw = new Date(`${searchParams.w || todayKey}T00:00:00Z`);
+  const anchor = isNaN(anchorRaw.getTime()) ? new Date(`${todayKey}T00:00:00Z`) : anchorRaw;
 
   let rangeStart: Date, rangeEnd: Date, prev: string, next: string, rangeLabel: string;
   if (view === 'week') {
@@ -47,16 +51,16 @@ export default async function ShiftsPage({
     next = iso(new Date(rangeStart.getTime() + 7 * 86400000));
     rangeLabel = `${rangeStart.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })} – ${new Date(rangeEnd.getTime() - 86400000).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })}`;
   } else {
-    rangeStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
-    rangeEnd = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1);
-    prev = iso(new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1));
-    next = iso(new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1));
-    rangeLabel = rangeStart.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
+    rangeStart = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1));
+    rangeEnd = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 1));
+    prev = iso(new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() - 1, 1)));
+    next = iso(new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 1)));
+    rangeLabel = rangeStart.toLocaleDateString('tr-TR', { timeZone: 'UTC', month: 'long', year: 'numeric' });
   }
 
-  const todayKey = new Intl.DateTimeFormat('en-CA', {
-    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit'
-  }).format(new Date());
+  // query boundaries = Istanbul midnights of the range's calendar dates
+  const qStart = `${iso(rangeStart)}T00:00:00+03:00`;
+  const qEnd = `${iso(rangeEnd)}T00:00:00+03:00`;
 
   // week columns (used by the grid)
   const weekBase = view === 'week' ? rangeStart : mondayOf(anchor);
@@ -72,8 +76,8 @@ export default async function ShiftsPage({
     supabase.from('shifts')
       .select('id, user_id, department_id, starts_at, ends_at, note, series_id, profiles:user_id(full_name), departments:department_id(name)')
       .eq('company_id', companyId)
-      .gte('starts_at', rangeStart.toISOString())
-      .lt('starts_at', rangeEnd.toISOString())
+      .gte('starts_at', new Date(qStart).toISOString())
+      .lt('starts_at', new Date(qEnd).toISOString())
       .order('starts_at'),
     supabase.from('departments').select('id, name').eq('company_id', companyId).order('name'),
     supabase.from('profiles').select('id, full_name').eq('company_id', companyId).eq('is_active', true).order('full_name'),

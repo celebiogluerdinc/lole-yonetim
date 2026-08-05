@@ -16,10 +16,14 @@ async function notify(supabase: any, companyId: string, userIds: string[], title
 // ==================== VARDİYA ====================
 const WD_OFFSET: Record<string, number> = { MO: 0, TU: 1, WE: 2, TH: 3, FR: 4, SA: 5, SU: 6 };
 
-function mondayOf(d: Date) {
+// All date math is done on UTC-midnight instants of the calendar dates the user
+// picked, and the actual shift instants are built with the fixed Istanbul
+// offset (+03:00, no DST) — the server itself runs in UTC.
+const dayUTC = (isoDate: string) => new Date(`${isoDate}T00:00:00Z`);
+function mondayOfUTC(d: Date) {
   const x = new Date(d);
-  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
-  x.setHours(0, 0, 0, 0);
+  x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
+  x.setUTCHours(0, 0, 0, 0);
   return x;
 }
 
@@ -61,19 +65,27 @@ export async function addShift(formData: FormData) {
   const allowed = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.includes(i.department_id);
   if (!allowed) return { error: 'Bu departmanda vardiya planlamaya yetkiniz yok.' };
 
+  // güvenlik: hedef kişiler bu şirketin aktif çalışanları olmalı
+  const { data: validUsers } = await supabase
+    .from('profiles').select('id').eq('company_id', companyId).in('id', i.user_ids);
+  if ((validUsers ?? []).length !== i.user_ids.length) {
+    return { error: 'Seçilen kişilerden bazıları bu şirkette bulunamadı.' };
+  }
+
   // occurrence dates
   const baseDates: Date[] = [];
-  const anchor = new Date(`${i.date}T00:00:00`);
+  const anchor = dayUTC(i.date);
+  if (isNaN(anchor.getTime())) return { error: 'Geçersiz tarih.' };
   if (i.repeat === 'none') {
     baseDates.push(anchor);
   } else {
-    const week0 = mondayOf(anchor);
+    const week0 = mondayOfUTC(anchor);
     for (let w = 0; w < i.weeks; w++) {
       for (const wd of i.weekdays) {
         const off = WD_OFFSET[wd];
         if (off === undefined) continue;
         const d = new Date(week0.getTime() + (w * 7 + off) * 86400000);
-        if (d >= mondayOf(anchor) && (w > 0 || d >= anchor || true)) baseDates.push(d);
+        if (d >= anchor) baseDates.push(d); // başlangıç tarihinden öncesine vardiya yazma
       }
     }
     baseDates.sort((a, b) => a.getTime() - b.getTime());
@@ -85,8 +97,9 @@ export async function addShift(formData: FormData) {
   const rows: any[] = [];
   for (const d of baseDates) {
     const dateStr = d.toISOString().slice(0, 10);
-    const starts = new Date(`${dateStr}T${i.start}`);
-    let ends = new Date(`${dateStr}T${i.end}`);
+    const starts = new Date(`${dateStr}T${i.start.slice(0, 5)}:00+03:00`);
+    let ends = new Date(`${dateStr}T${i.end.slice(0, 5)}:00+03:00`);
+    if (isNaN(starts.getTime()) || isNaN(ends.getTime())) return { error: 'Geçersiz saat.' };
     if (ends <= starts) ends = new Date(ends.getTime() + 24 * 3600 * 1000); // gece vardiyası
     for (const uid of i.user_ids) {
       rows.push({
@@ -118,21 +131,30 @@ export async function addShift(formData: FormData) {
 }
 
 export async function deleteShift(id: string) {
-  const { supabase } = await getCtx();
-  const { error } = await supabase.from('shifts').delete().eq('id', id); // RLS korur
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Geçersiz kayıt.' };
+  const { supabase, profile, managedDepartmentIds } = await getCtx();
+  if (!(['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0)) {
+    return { error: 'Vardiya silme yetkiniz yok.' };
+  }
+  const { data, error } = await supabase.from('shifts').delete().eq('id', id).select('id'); // RLS korur
   if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Vardiya bulunamadı veya silme yetkiniz yok.' };
   revalidatePath('/shifts');
   return { ok: true };
 }
 
-/** Deletes every remaining shift of a recurring series (RLS scoped). */
+/** Deletes every shift of a recurring series (RLS scoped). */
 export async function deleteShiftSeries(seriesId: string) {
-  if (!seriesId) return { error: 'Seri bulunamadı.' };
-  const { supabase } = await getCtx();
-  const { error } = await supabase.from('shifts').delete().eq('series_id', seriesId);
+  if (!z.string().uuid().safeParse(seriesId).success) return { error: 'Seri bulunamadı.' };
+  const { supabase, profile, managedDepartmentIds } = await getCtx();
+  if (!(['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0)) {
+    return { error: 'Vardiya silme yetkiniz yok.' };
+  }
+  const { data, error } = await supabase.from('shifts').delete().eq('series_id', seriesId).select('id');
   if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Seri bulunamadı veya silme yetkiniz yok.' };
   revalidatePath('/shifts');
-  return { ok: true };
+  return { ok: true, count: data.length };
 }
 
 // ==================== İZİN ====================
@@ -186,10 +208,24 @@ export async function requestLeave(formData: FormData) {
 }
 
 export async function decideLeave(id: string, approve: boolean, note?: string) {
-  const { supabase, profile, companyId } = await getCtx();
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Geçersiz talep.' };
+  const { supabase, profile, managedDepartmentIds } = await getCtx();
   const { data: req } = await supabase.from('leave_requests').select('*').eq('id', id).maybeSingle();
   if (!req) return { error: 'Talep bulunamadı.' };
   if (req.status !== 'pending') return { error: 'Bu talep zaten sonuçlanmış.' };
+
+  // yalnızca yöneticiler karar verebilir; kimse KENDİ talebini onaylayamaz
+  const isAdmin = ['super_admin', 'admin'].includes(profile.role);
+  if (req.user_id === profile.id && profile.role !== 'super_admin') {
+    return { error: 'Kendi izin talebinizi kendiniz sonuçlandıramazsınız.' };
+  }
+  if (!isAdmin) {
+    if (managedDepartmentIds.length === 0) return { error: 'İzin taleplerini sonuçlandırma yetkiniz yok.' };
+    const { data: shared } = await supabase
+      .from('department_members').select('department_id')
+      .eq('user_id', req.user_id).in('department_id', managedDepartmentIds).limit(1);
+    if (!shared?.length) return { error: 'Bu kişi yönettiğiniz departmanlarda değil.' };
+  }
 
   const { error } = await supabase.from('leave_requests').update({
     status: approve ? 'approved' : 'rejected',
@@ -218,6 +254,7 @@ export async function cancelLeave(id: string) {
 
 // ==================== PUANTAJ ====================
 export async function clockIn(method: 'qr' | 'manual') {
+  if (!['qr', 'manual'].includes(method)) return { error: 'Geçersiz giriş yöntemi.' };
   const { supabase, profile, companyId } = await getCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
@@ -229,7 +266,11 @@ export async function clockIn(method: 'qr' | 'manual') {
   const { error } = await supabase.from('time_entries').insert({
     company_id: companyId, user_id: profile.id, in_method: method
   });
-  if (error) return { error: error.message };
+  if (error) {
+    return { error: error.code === '23505'
+      ? 'Zaten açık bir mesainiz var. Önce çıkış yapın.'
+      : error.message };
+  }
   revalidatePath('/clock');
   return { ok: true };
 }

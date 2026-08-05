@@ -71,6 +71,48 @@ export async function postAnnouncement(formData: FormData) {
   return { ok: true };
 }
 
+/** Delete an announcement — admin, or the manager who can post to its department. */
+export async function deleteAnnouncement(id: string) {
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Geçersiz duyuru.' };
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const { data: ann } = await supabase.from('announcements')
+    .select('id, company_id, department_id, author_id').eq('id', id).maybeSingle();
+  if (!ann || ann.company_id !== companyId) return { error: 'Duyuru bulunamadı.' };
+
+  const canDelete = ['super_admin', 'admin'].includes(profile.role) ||
+    (ann.department_id ? managedDepartmentIds.includes(ann.department_id) : false);
+  if (!canDelete) return { error: 'Bu duyuruyu silme yetkiniz yok.' };
+
+  const { error } = await supabase.from('announcements').delete().eq('id', id);
+  if (error) return { error: error.message };
+  revalidatePath('/announcements');
+  revalidatePath('/home');
+  return { ok: true };
+}
+
+/** Pin / unpin an announcement (same permission rule as delete). */
+export async function togglePinAnnouncement(id: string, pinned: boolean) {
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Geçersiz duyuru.' };
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const { data: ann } = await supabase.from('announcements')
+    .select('id, company_id, department_id').eq('id', id).maybeSingle();
+  if (!ann || ann.company_id !== companyId) return { error: 'Duyuru bulunamadı.' };
+
+  const canEdit = ['super_admin', 'admin'].includes(profile.role) ||
+    (ann.department_id ? managedDepartmentIds.includes(ann.department_id) : false);
+  if (!canEdit) return { error: 'Bu duyuruyu düzenleme yetkiniz yok.' };
+
+  const { error } = await supabase.from('announcements').update({ is_pinned: pinned }).eq('id', id);
+  if (error) return { error: error.message };
+  revalidatePath('/announcements');
+  revalidatePath('/home');
+  return { ok: true };
+}
+
 export async function markAnnouncementsRead(ids: string[]) {
   if (!ids.length) return { ok: true };
   const { supabase, profile } = await getCtx();

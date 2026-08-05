@@ -127,8 +127,9 @@ export default function UserManage({
                 type="button"
                 disabled={pending}
                 onClick={() => start(async () => {
-                  await toggleUserActive(user.id, !user.is_active);
-                  router.refresh();
+                  const r = await toggleUserActive(user.id, !user.is_active);
+                  if (r?.error) setError(r.error);
+                  else router.refresh();
                 })}
                 className={`btn-outline ${user.is_active ? '!text-rose-300' : '!text-emerald-300'}`}
               >

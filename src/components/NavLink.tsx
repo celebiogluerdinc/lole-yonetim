@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import {
   Home, Calendar, Megaphone, PlusSquare, LayoutTemplate,
   Users, Building2, Landmark, MessageCircle, Bell, BarChart3, Sparkles,
-  CalendarClock, Plane, Clock, ClipboardList, Settings, type LucideIcon
+  CalendarClock, Plane, Clock, ClipboardList, Settings, UserCircle2, type LucideIcon
 } from 'lucide-react';
 
 const META: Record<string, { Icon: LucideIcon; color: string }> = {
@@ -25,10 +25,17 @@ const META: Record<string, { Icon: LucideIcon; color: string }> = {
   users: { Icon: Users, color: '#AF52DE' },
   building: { Icon: Building2, color: '#8E8E93' },
   settings: { Icon: Settings, color: '#8E8E93' },
-  landmark: { Icon: Landmark, color: '#FF9500' }
+  landmark: { Icon: Landmark, color: '#FF9500' },
+  profile: { Icon: UserCircle2, color: '#0A84FF' }
 };
 
 export type IconName = keyof typeof META;
+
+/** Bare icon lookup — used by the mobile menu sheet. */
+export function NavIcon({ name, size = 20 }: { name: IconName; size?: number }) {
+  const { Icon } = META[name] ?? META.home;
+  return <Icon size={size} strokeWidth={2} />;
+}
 
 function Badge({ n, mobile }: { n: number; mobile?: boolean }) {
   if (!n) return null;

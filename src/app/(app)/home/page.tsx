@@ -5,6 +5,7 @@ import { isToday, isOverdue, ROLE_LABEL, TZ } from '@/lib/utils';
 import type { Task } from '@/lib/types';
 import TaskRow from '@/components/TaskRow';
 import NotesPanel from '@/components/NotesPanel';
+import PushSetup from '@/components/PushSetup';
 import LiveClock from '@/components/LiveClock';
 import AutoRefresh from '@/components/AutoRefresh';
 import {
@@ -58,12 +59,11 @@ export default async function HomePage({
     companyId
       ? supabase
           .from('announcements')
-          .select('*')
+          .select('*, departments:department_id(name)')
           .eq('company_id', companyId)
-          .is('department_id', null)
           .order('is_pinned', { ascending: false })
           .order('created_at', { ascending: false })
-          .limit(3)
+          .limit(6)
       : Promise.resolve({ data: [] } as any),
     supabase
       .from('notes')
@@ -215,7 +215,7 @@ export default async function HomePage({
       </header>
 
       {/* Team workflow — managers only */}
-      {isManager && flowTasks.length >= 0 && (
+      {isManager && (
         <section>
           <div className="flex items-baseline justify-between pr-2">
             <h2 className="section-title">İş Akışı</h2>
@@ -346,13 +346,20 @@ export default async function HomePage({
             <Link href="/announcements" className="text-[13px] text-ios-blue font-medium">Tümü</Link>
           </div>
           <div className="card divide-y divide-white/[0.08] overflow-hidden">
-            {pano.map(a => (
+            {pano.slice(0, 4).map(a => (
               <Link key={a.id} href="/announcements" className="flex items-start gap-3 px-4 py-3 hover:bg-[#1C1C1E]/[0.04] transition-colors">
                 <span className="smart-icon !w-7 !h-7 mt-0.5" style={{ backgroundColor: a.is_pinned ? '#FF9500' : '#8E8E93' }}>
                   {a.is_pinned ? <Pin size={14} /> : <Inbox size={14} />}
                 </span>
                 <span className="min-w-0">
-                  <p className="text-[15px] font-medium truncate">{a.title}</p>
+                  <p className="text-[15px] font-medium truncate">
+                    {a.title}
+                    {a.departments?.name && (
+                      <span className="ml-1.5 text-[11px] font-semibold text-ios-blue bg-ios-blue/15 rounded-full px-2 py-0.5 align-middle">
+                        {a.departments.name}
+                      </span>
+                    )}
+                  </p>
                   <p className="text-[13px] text-[#8E8E93] line-clamp-1">{a.body}</p>
                 </span>
               </Link>
@@ -363,6 +370,9 @@ export default async function HomePage({
 
       {/* Notes */}
       <NotesPanel notes={(notes ?? []) as any} />
+
+      {/* Push izni — abone değilse öner (Bildirimler sayfasına girmeyenler için) */}
+      <PushSetup />
     </main>
   );
 }

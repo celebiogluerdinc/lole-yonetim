@@ -31,6 +31,7 @@ export default function ChatThread({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [text, setText] = useState('');
+  const [sendError, setSendError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,13 +39,11 @@ export default function ChatThread({
   }, [messages.length]);
 
   useEffect(() => {
-    if (conversationId === 'mock') return;
     markRead(conversationId).catch(() => {});
   }, [conversationId, messages.length]);
 
   // lightweight polling — new messages appear within a few seconds
   useEffect(() => {
-    if (conversationId === 'mock') return;
     const t = setInterval(() => router.refresh(), 4000);
     return () => clearInterval(t);
   }, [router, conversationId]);
@@ -53,9 +52,15 @@ export default function ChatThread({
     const body = text.trim();
     if (!body || pending) return;
     setText('');
+    setSendError(null);
     start(async () => {
-      await sendMessage(conversationId, body);
-      router.refresh();
+      const r = await sendMessage(conversationId, body);
+      if (r?.error) {
+        setText(body); // yazılan metni geri getir — kaybolmasın
+        setSendError(r.error);
+      } else {
+        router.refresh();
+      }
     });
   }
 
@@ -122,6 +127,11 @@ export default function ChatThread({
       </div>
 
       {/* Composer */}
+      {sendError && (
+        <p className="text-[12px] text-rose-300 bg-rose-500/10 px-4 py-1.5 text-center">
+          Mesaj gönderilemedi: {sendError}
+        </p>
+      )}
       <form
         onSubmit={(e) => { e.preventDefault(); onSend(); }}
         className="flex items-center gap-2 px-3 py-2.5 bg-black/85 backdrop-blur border-t border-white/[0.08]"

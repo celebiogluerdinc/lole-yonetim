@@ -29,7 +29,7 @@ export default function NewTaskForm({
   const [recur, setRecur] = useState<'none' | 'daily' | 'weekly' | 'monthly' | 'custom'>('none');
   const [draft, setDraft] = useState<any>(null);
   const [draftV, setDraftV] = useState(0);
-  const [suggestion, setSuggestion] = useState<{ reason: string } | null>(null);
+  const [suggestion, setSuggestion] = useState<{ reason: string; isError?: boolean } | null>(null);
   const [suggestPending, startSuggest] = useTransition();
 
   const deptPeople = useMemo(() => {
@@ -184,7 +184,7 @@ export default function NewTaskForm({
                           }
                         });
                       } else if (r?.error) {
-                        setSuggestion({ reason: r.error });
+                        setSuggestion({ reason: r.error, isError: true });
                       }
                     });
                   }}
@@ -197,8 +197,11 @@ export default function NewTaskForm({
               </span>
             </div>
             {suggestion && (
-              <p className="text-[13px] text-[#9F9CFF] bg-[#5E5CE6]/[0.18] rounded-xl px-3 py-2 mb-2">
-                ✨ {suggestion.reason}
+              <p className={`text-[13px] rounded-xl px-3 py-2 mb-2 ${
+                suggestion.isError
+                  ? 'text-rose-300 bg-rose-500/10 border border-rose-500/30'
+                  : 'text-[#9F9CFF] bg-[#5E5CE6]/[0.18]'}`}>
+                {suggestion.isError ? '⚠️' : '✨'} {suggestion.reason}
               </p>
             )}
             <div className="grid sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto rounded-xl border border-white/[0.10] p-3">

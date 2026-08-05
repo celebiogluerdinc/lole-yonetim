@@ -124,7 +124,7 @@ export default function ShiftsClient({
       {isManager && (
         <span className="absolute -top-1.5 -right-1.5 hidden group-hover:flex gap-0.5">
           <button title="Bu vardiyayı sil" onClick={() => removeOne(s)}
-            className="w-4.5 h-4.5 w-[18px] h-[18px] rounded-full bg-ios-red text-white flex items-center justify-center">
+            className="w-[18px] h-[18px] rounded-full bg-ios-red text-white flex items-center justify-center">
             <X size={10} strokeWidth={3} />
           </button>
           {s.series_id && (

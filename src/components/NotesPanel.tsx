@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Trash2 } from 'lucide-react';
 import { addNote, deleteNote } from '@/app/(app)/home/actions';
@@ -11,6 +11,7 @@ interface NoteT { id: string; body: string; created_at: string; }
 export default function NotesPanel({ notes }: { notes: NoteT[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLFormElement>(null);
 
   return (
@@ -25,7 +26,11 @@ export default function NotesPanel({ notes }: { notes: NoteT[] }) {
             </div>
             <button
               aria-label="Notu sil"
-              onClick={() => start(async () => { await deleteNote(n.id); router.refresh(); })}
+              onClick={() => start(async () => {
+                setError(null);
+                const r = await deleteNote(n.id);
+                if (r?.error) setError(r.error); else router.refresh();
+              })}
               className="opacity-0 group-hover:opacity-100 text-[#AEAEB2] hover:text-ios-red transition-all p-1 mt-0.5"
             >
               <Trash2 size={15} />
@@ -34,12 +39,16 @@ export default function NotesPanel({ notes }: { notes: NoteT[] }) {
         ))}
 
         {/* Apple-style "+ Yeni Anımsatıcı" quick-add row */}
+        {error && (
+          <p className="text-[12px] text-rose-300 bg-rose-500/10 px-4 py-2">{error}</p>
+        )}
         <form
           ref={ref}
           action={(fd) => start(async () => {
-            await addNote(fd);
-            ref.current?.reset();
-            router.refresh();
+            setError(null);
+            const r = await addNote(fd);
+            if (r?.error) setError(r.error);
+            else { ref.current?.reset(); router.refresh(); }
           })}
           className="flex items-center gap-3 px-4 py-2.5"
         >

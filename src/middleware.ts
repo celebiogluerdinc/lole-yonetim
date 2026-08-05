@@ -2,6 +2,13 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
+  // Cron endpoints authenticate with CRON_SECRET themselves — cookie auth would
+  // 307 them to /login and silently break push delivery + weekly reports.
+  const { pathname } = request.nextUrl;
+  if (pathname === '/api/push' || pathname === '/api/report') {
+    return NextResponse.next();
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -50,5 +57,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.json|icons).*)']
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|icons).*)']
 };

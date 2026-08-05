@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function TemplatesPage() {
   const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
-  if (profile.role === 'staff' && managedDepartmentIds.length === 0) redirect('/home');
+  const isManager = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
+  if (!isManager) redirect('/home');
   if (!companyId) redirect(profile.role === 'super_admin' ? '/super/companies' : '/home');
 
   const [{ data: templates }, { data: items }, { data: people }, { data: depts }] = await Promise.all([

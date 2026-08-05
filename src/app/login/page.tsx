@@ -1,5 +1,6 @@
 import { login } from './actions';
 import { supabaseServer } from '@/lib/supabase/server';
+import SubmitButton from '@/components/SubmitButton';
 
 export default async function LoginPage({
   searchParams
@@ -38,7 +39,7 @@ export default async function LoginPage({
               Kullanıcı adı veya parola hatalı. Lütfen tekrar deneyin.
             </p>
           )}
-          <button type="submit" className="btn-primary w-full">Giriş Yap</button>
+          <SubmitButton pendingText="Giriş yapılıyor…">Giriş Yap</SubmitButton>
         </form>
 
         <p className="text-center text-xs text-[#8E8E93] mt-6">

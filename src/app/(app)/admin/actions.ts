@@ -5,8 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
 
-function requireAdmin(role: string) {
-  if (!['super_admin', 'admin'].includes(role)) throw new Error('Yetkisiz.');
+/** Returns a Turkish error string when the caller is not an admin, else null. */
+function requireAdmin(role: string): string | null {
+  return ['super_admin', 'admin'].includes(role) ? null : 'Bu işlem için yönetici yetkisi gerekir.';
 }
 
 /** Turkish-safe slug for usernames → login e-mail. */
@@ -53,7 +54,8 @@ export async function createUser(formData: FormData) {
   }
 
   const { profile, companyId: actingCompany } = await getCtx();
-  requireAdmin(profile.role);
+  const authErr = requireAdmin(profile.role);
+  if (authErr) return { error: authErr };
 
   // super admin may create into ANY company; company admin only into their own
   const companyId = profile.role === 'super_admin'
@@ -129,7 +131,8 @@ export async function updateUser(formData: FormData) {
   }
 
   const { profile, companyId } = await getCtx();
-  requireAdmin(profile.role);
+  const authErr = requireAdmin(profile.role);
+  if (authErr) return { error: authErr };
 
   const admin = supabaseAdmin();
   const { data: target } = await admin
@@ -176,10 +179,51 @@ export async function updateUser(formData: FormData) {
 }
 
 export async function toggleUserActive(userId: string, active: boolean) {
-  const { supabase, profile } = await getCtx();
-  requireAdmin(profile.role);
-  await supabase.from('profiles').update({ is_active: active }).eq('id', userId);
+  if (!z.string().uuid().safeParse(userId).success) return { error: 'Geçersiz kullanıcı.' };
+  const { profile, companyId } = await getCtx();
+  const authErr = requireAdmin(profile.role);
+  if (authErr) return { error: authErr };
+  if (userId === profile.id) return { error: 'Kendi hesabınızı pasifleştiremezsiniz.' };
+
+  const admin = supabaseAdmin();
+  const { data: target } = await admin
+    .from('profiles').select('company_id').eq('id', userId).maybeSingle();
+  if (!target) return { error: 'Kullanıcı bulunamadı.' };
+  if (profile.role !== 'super_admin' && target.company_id !== companyId) {
+    return { error: 'Bu kullanıcı sizin şirketinizde değil.' };
+  }
+
+  const { error } = await admin.from('profiles').update({ is_active: active }).eq('id', userId);
+  if (error) return { error: error.message };
+  // block/unblock sign-in too — deactivation must actually lock the account
+  await admin.auth.admin.updateUserById(userId, {
+    ban_duration: active ? 'none' : '876000h'
+  } as any).catch(() => {});
+
   revalidatePath('/admin/users');
+  return { ok: true };
+}
+
+/** Rename a department — admin of the company (or super admin). */
+export async function renameDepartment(formData: FormData) {
+  const schema = z.object({ department_id: z.string().uuid(), name: z.string().min(2).max(100) });
+  const parsed = schema.safeParse({
+    department_id: String(formData.get('department_id') ?? ''),
+    name: String(formData.get('name') ?? '').trim()
+  });
+  if (!parsed.success) return { error: 'Departman adı en az 2 karakter olmalı.' };
+
+  const { supabase, profile, companyId } = await getCtx();
+  const authErr = requireAdmin(profile.role);
+  if (authErr) return { error: authErr };
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const { error } = await supabase.from('departments')
+    .update({ name: parsed.data.name })
+    .eq('id', parsed.data.department_id)
+    .eq('company_id', companyId);
+  if (error) return { error: error.message };
+  revalidatePath('/admin/departments');
   return { ok: true };
 }
 
@@ -188,7 +232,8 @@ export async function createDepartment(formData: FormData) {
   if (!name.success) return { error: 'Departman adı gerekli.' };
 
   const { supabase, profile, companyId } = await getCtx();
-  requireAdmin(profile.role);
+  const authErr = requireAdmin(profile.role);
+  if (authErr) return { error: authErr };
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
   const { error } = await supabase.from('departments').insert({
@@ -209,7 +254,8 @@ export async function renameCompany(formData: FormData) {
   if (!parsed.success) return { error: 'Şirket adı en az 2 karakter olmalı.' };
 
   const { supabase, profile, companyId } = await getCtx();
-  requireAdmin(profile.role);
+  const authErr = requireAdmin(profile.role);
+  if (authErr) return { error: authErr };
   if (profile.role !== 'super_admin' && parsed.data.company_id !== companyId) {
     return { error: 'Yalnızca kendi şirketinizin adını değiştirebilirsiniz.' };
   }
@@ -240,7 +286,8 @@ export async function setAppName(formData: FormData) {
 /** Restore a JSON backup into the ACTIVE company (upsert by id). Photos/files are not included. */
 export async function restoreBackup(formData: FormData) {
   const { profile, companyId } = await getCtx();
-  requireAdmin(profile.role);
+  const authErr = requireAdmin(profile.role);
+  if (authErr) return { error: authErr };
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
   const file = formData.get('file') as File | null;
@@ -260,25 +307,55 @@ export async function restoreBackup(formData: FormData) {
   const admin = supabaseAdmin();
   const counts: Record<string, number> = {};
 
+  // Child tables have no company_id — restrict them to parents that belong to
+  // this company (from the backup itself or already in the database).
+  const ownRows = (rows: any) => (Array.isArray(rows) ? rows : [])
+    .filter((r: any) => r && typeof r === 'object' && r.company_id === companyId);
+  const [{ data: dbTpls }, { data: dbTasks }] = await Promise.all([
+    admin.from('templates').select('id').eq('company_id', companyId),
+    admin.from('tasks').select('id').eq('company_id', companyId)
+  ]);
+  const tplIds = new Set<string>([
+    ...ownRows(payload.templates).map((r: any) => r.id),
+    ...(dbTpls ?? []).map((r: any) => r.id)
+  ]);
+  const taskIds = new Set<string>([
+    ...ownRows(payload.tasks).map((r: any) => r.id),
+    ...(dbTasks ?? []).map((r: any) => r.id)
+  ]);
+
   // parent → child order; rows are upserted by primary key (id)
   const order: [string, any[]][] = [
-    ['departments', payload.departments],
-    ['templates', payload.templates],
-    ['template_items', payload.template_items],
-    ['tasks', payload.tasks],
-    ['task_assignees', payload.task_assignees],
-    ['checklist_items', payload.checklist_items],
-    ['announcements', payload.announcements],
-    ['notes', payload.notes],
-    ['shifts', payload.shifts],
-    ['leave_requests', payload.leave_requests],
-    ['time_entries', payload.time_entries]
+    ['departments', ownRows(payload.departments)],
+    ['templates', ownRows(payload.templates)],
+    ['template_items', (Array.isArray(payload.template_items) ? payload.template_items : [])
+      .filter((r: any) => r && tplIds.has(r.template_id))],
+    ['tasks', ownRows(payload.tasks)],
+    ['task_assignees', (Array.isArray(payload.task_assignees) ? payload.task_assignees : [])
+      .filter((r: any) => r && taskIds.has(r.task_id))],
+    ['checklist_items', (Array.isArray(payload.checklist_items) ? payload.checklist_items : [])
+      .filter((r: any) => r && taskIds.has(r.task_id))],
+    ['announcements', ownRows(payload.announcements)],
+    ['notes', ownRows(payload.notes)],
+    ['shifts', ownRows(payload.shifts)],
+    ['leave_requests', ownRows(payload.leave_requests)],
+    ['time_entries', ownRows(payload.time_entries)]
   ];
 
   for (const [table, rows] of order) {
-    if (!Array.isArray(rows) || rows.length === 0) continue;
-    // güvenlik: company_id taşıyan satırlar yalnızca aktif şirkete yazılır
-    const safe = rows.filter((r: any) => !('company_id' in r) || r.company_id === companyId);
+    if (rows.length === 0) continue;
+    // güvenlik: id çakışmasıyla BAŞKA şirketin mevcut kaydı ezilemesin
+    let safe = rows.filter((r: any) => typeof r.id === 'string');
+    if (safe.length && ['departments', 'templates', 'tasks', 'announcements', 'notes', 'shifts', 'leave_requests', 'time_entries'].includes(table)) {
+      const ids = safe.map((r: any) => r.id);
+      const foreign = new Set<string>();
+      for (let i = 0; i < ids.length; i += 500) {
+        const { data: clash } = await admin.from(table)
+          .select('id').in('id', ids.slice(i, i + 500)).neq('company_id', companyId);
+        for (const c of clash ?? []) foreign.add(c.id);
+      }
+      safe = safe.filter((r: any) => !foreign.has(r.id));
+    }
     for (let i = 0; i < safe.length; i += 500) {
       const chunk = safe.slice(i, i + 500);
       const { error } = await admin.from(table).upsert(chunk, { onConflict: 'id' });

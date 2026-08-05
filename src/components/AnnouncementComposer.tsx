@@ -77,7 +77,7 @@ export default function AnnouncementComposer({
           </select>
         </div>
         <label className="flex items-center gap-2 text-sm pb-2.5 cursor-pointer">
-          <input type="checkbox" name="is_pinned" className="rounded accent-[#ff5a1f] w-4 h-4" />
+          <input type="checkbox" name="is_pinned" className="rounded accent-[#0A84FF] w-4 h-4" />
           📌 Panoya sabitle
         </label>
       </div>

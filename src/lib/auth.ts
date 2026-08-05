@@ -36,6 +36,11 @@ export const getCtx = cache(async (): Promise<Ctx> => {
       .eq('is_manager', true)
   ]);
   if (!profile) redirect('/login');
+  if (profile.is_active === false) {
+    // deactivated accounts lose access immediately
+    await supabase.auth.signOut();
+    redirect('/login?error=1');
+  }
 
   let companyId: string | null = profile.company_id;
   if (profile.role === 'super_admin') {

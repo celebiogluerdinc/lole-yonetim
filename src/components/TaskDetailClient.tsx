@@ -25,7 +25,12 @@ export default function TaskDetailClient({
   const [blockOpen, setBlockOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const itemFileRef = useRef<HTMLInputElement>(null);
+  const [photoItemId, setPhotoItemId] = useState<string | null>(null);
   const noteRef = useRef<HTMLFormElement>(null);
+
+  const itemPhotoCount = (itemId: string) =>
+    attachments.filter(a => a.checklist_item_id === itemId).length;
 
   // optimistic checklist state — ticks render instantly, server syncs in background
   const [itemOverride, setItemOverride] = useState<Record<string, boolean>>({});
@@ -92,9 +97,44 @@ export default function TaskDetailClient({
                   <p className="text-[11px] text-[#AEAEB2]">{fmtDate(item.done_at)}</p>
                 )}
               </div>
-              {item.requires_photo && <Camera size={14} className="text-amber-500 shrink-0" />}
+              {item.requires_photo && (
+                itemPhotoCount(item.id) > 0 ? (
+                  <span className="shrink-0 flex items-center gap-1 text-[11px] font-medium text-emerald-300 bg-emerald-500/15 rounded-full px-2 py-1">
+                    <Camera size={12} /> {itemPhotoCount(item.id)}
+                  </span>
+                ) : finished || inReview ? (
+                  <Camera size={14} className="text-amber-500 shrink-0" />
+                ) : (
+                  <button
+                    onClick={() => { setPhotoItemId(item.id); itemFileRef.current?.click(); }}
+                    className="shrink-0 flex items-center gap-1 text-[11px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/30 rounded-full px-2.5 py-1 hover:bg-amber-500/25 transition-colors"
+                    title="Bu madde fotoğraf gerektirir"
+                  >
+                    <Camera size={12} /> Fotoğraf ekle
+                  </button>
+                )
+              )}
             </div>
           ))}
+          {/* hidden input for per-item required photos */}
+          <input
+            ref={itemFileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f || !photoItemId) return;
+              const fd = new FormData();
+              fd.set('task_id', task.id);
+              fd.set('item_id', photoItemId);
+              fd.set('file', f);
+              run(() => uploadAttachment(fd));
+              setPhotoItemId(null);
+              if (itemFileRef.current) itemFileRef.current.value = '';
+            }}
+          />
         </section>
       )}
 
@@ -181,7 +221,11 @@ export default function TaskDetailClient({
           ref={noteRef}
           action={(fd) => {
             fd.set('task_id', task.id);
-            run(async () => { const r = await addTaskNote(fd); noteRef.current?.reset(); return r; });
+            run(async () => {
+              const r = await addTaskNote(fd);
+              if (!r?.error) noteRef.current?.reset(); // sadece başarıda temizle
+              return r;
+            });
           }}
           className="flex gap-2"
         >

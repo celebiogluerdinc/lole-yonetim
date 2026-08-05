@@ -2,12 +2,14 @@ import { getCtx } from '@/lib/auth';
 import { logout } from '@/app/login/actions';
 import { ROLE_LABEL } from '@/lib/utils';
 import NavLink, { type IconName } from '@/components/NavLink';
+import MobileMenu from '@/components/MobileMenu';
+import Link from 'next/link';
 import { LogOut } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const { supabase, profile, companyId } = await getCtx();
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
 
   const [companyRes, { count: unreadCount }, appNameRes] = await Promise.all([
     companyId
@@ -25,7 +27,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   else if (profile.role === 'super_admin') companyName = 'Tüm Şirketler';
   const unread = unreadCount ?? 0;
 
-  const isManagerRole = ['super_admin', 'admin', 'manager'].includes(profile.role);
+  // same rule the /manage pages enforce — "manager" role alone isn't enough,
+  // the user must actually manage a department (or be an admin)
+  const isManagerRole = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
   const isAdminRole = ['super_admin', 'admin'].includes(profile.role);
 
   const nav = ([
@@ -44,7 +48,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/admin/users', label: 'Kullanıcılar', icon: 'users', show: isAdminRole, badge: 0 },
     { href: '/admin/departments', label: 'Departmanlar', icon: 'building', show: isAdminRole, badge: 0 },
     { href: '/admin/settings', label: 'Yönetim Paneli', icon: 'settings', show: isAdminRole, badge: 0 },
-    { href: '/super/companies', label: 'Şirketler', icon: 'landmark', show: profile.role === 'super_admin', badge: 0 }
+    { href: '/super/companies', label: 'Şirketler', icon: 'landmark', show: profile.role === 'super_admin', badge: 0 },
+    { href: '/profile', label: 'Profilim', icon: 'profile', show: true, badge: 0 }
   ] as const).filter(n => n.show) as unknown as { href: string; label: string; icon: IconName; show: boolean; badge: number }[];
 
   return (
@@ -66,7 +71,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           ))}
         </nav>
         <div className="border-t border-white/[0.08] pt-3 mt-3">
-          <div className="flex items-center gap-2.5 px-3 pb-2">
+          <Link href="/profile" className="flex items-center gap-2.5 px-3 pb-2 hover:opacity-80 transition-opacity">
             <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-xs font-bold shrink-0">
               {(profile.full_name || profile.email)[0]?.toUpperCase()}
             </div>
@@ -74,7 +79,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <p className="text-sm font-medium truncate">{profile.full_name || profile.email}</p>
               <p className="text-xs text-[#8E8E93]">{ROLE_LABEL[profile.role]}</p>
             </div>
-          </div>
+          </Link>
           <form action={logout}>
             <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-[#8E8E93] hover:bg-[#1C1C1E]/10 transition-colors">
               <LogOut size={16} /> Çıkış yap
@@ -88,11 +93,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {children}
       </div>
 
-      {/* Bottom bar — mobile */}
+      {/* Bottom bar — mobile: 4 quick tabs + full menu sheet */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#1C1C1E]/85 backdrop-blur-xl border-t border-white/[0.10] flex justify-around py-1.5 z-40 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
-        {nav.slice(0, 5).map(n => (
+        {nav.slice(0, 4).map(n => (
           <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} mobile />
         ))}
+        <MobileMenu
+          items={nav.map(({ href, label, icon, badge }) => ({ href, label, icon, badge }))}
+          userName={profile.full_name || profile.email}
+          roleLabel={ROLE_LABEL[profile.role]}
+        />
       </nav>
     </div>
   );

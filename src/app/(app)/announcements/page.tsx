@@ -2,6 +2,7 @@ import { getCtx } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { fmtDate } from '@/lib/utils';
 import AnnouncementComposer from '@/components/AnnouncementComposer';
+import AnnouncementActions from '@/components/AnnouncementActions';
 import MarkRead from '@/components/MarkRead';
 import { Pin } from 'lucide-react';
 
@@ -67,9 +68,15 @@ export default async function AnnouncementsPage() {
                 {a.is_pinned && <Pin size={15} className="text-brand-500" />}
                 {a.title}
               </h2>
-              {!readSet.has(a.id) && (
-                <span className="badge bg-brand-100 text-brand-700 shrink-0">Yeni</span>
-              )}
+              <span className="flex items-center gap-2 shrink-0">
+                {!readSet.has(a.id) && (
+                  <span className="badge bg-brand-100 text-brand-700">Yeni</span>
+                )}
+                {(['super_admin', 'admin'].includes(profile.role) ||
+                  (a.department_id && managedDepartmentIds.includes(a.department_id))) && (
+                  <AnnouncementActions id={a.id} pinned={a.is_pinned} />
+                )}
+              </span>
             </div>
             <p className="text-sm text-[#B0B0B5] mt-2 whitespace-pre-wrap">{a.body}</p>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-xs text-[#AEAEB2]">

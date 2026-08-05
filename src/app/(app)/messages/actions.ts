@@ -123,5 +123,6 @@ export async function markRead(conversationId: string) {
     .update({ last_read_at: new Date().toISOString() })
     .eq('conversation_id', conversationId)
     .eq('user_id', profile.id);
+  revalidatePath('/messages'); // okunmadı rozeti hemen güncellensin
   return { ok: true };
 }

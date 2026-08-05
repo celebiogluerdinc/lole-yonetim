@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getCtx } from '@/lib/auth';
 import NewDepartmentForm from '@/components/NewDepartmentForm';
+import DeptRename from '@/components/DeptRename';
 import { Building2 } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -32,11 +33,14 @@ export default async function DepartmentsPage() {
       <div className="grid sm:grid-cols-2 gap-4 mt-6">
         {(depts ?? []).map(d => (
           <div key={d.id} className="card p-5">
-            <h3 className="font-semibold flex items-center gap-2">
-              <Building2 size={16} className="text-ios-blue" />
-              {d.name}
-              {d.is_preset && <span className="badge bg-white/10 text-[#8E8E93]">Hazır</span>}
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold flex items-center gap-2 flex-1 min-w-0">
+                <Building2 size={16} className="text-ios-blue shrink-0" />
+                <span className="truncate">{d.name}</span>
+                {d.is_preset && <span className="badge bg-white/10 text-[#8E8E93] shrink-0">Hazır</span>}
+              </h3>
+              <DeptRename id={d.id} name={d.name} />
+            </div>
             <div className="mt-3 space-y-1 text-sm">
               <p className="text-[#8E8E93]">
                 <span className="font-medium text-[#D1D1D6]">Müdür:</span>{' '}
@@ -51,7 +55,8 @@ export default async function DepartmentsPage() {
         ))}
       </div>
       <p className="text-xs text-[#AEAEB2] mt-4">
-        Üyelik ve müdür atamaları Kullanıcılar sayfasından, kullanıcı oluştururken yapılır.
+        Üyelik ve müdür atamaları Kullanıcılar sayfasından yapılır — kullanıcı oluştururken
+        veya mevcut kullanıcıya tıklayıp düzenleyerek.
       </p>
     </main>
   );

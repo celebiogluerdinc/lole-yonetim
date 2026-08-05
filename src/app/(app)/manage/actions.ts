@@ -31,8 +31,16 @@ const TaskSchema = z.object({
   custom_rrule: z.string().optional().default('')
 });
 
+/** <input type="datetime-local"> has no timezone — interpret it as Istanbul (+03:00, no DST). */
+function istDate(s: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) && !/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(s)) {
+    return new Date(`${s.slice(0, 16)}:00+03:00`);
+  }
+  return new Date(s);
+}
+
 function buildOccurrences(input: z.infer<typeof TaskSchema>): { dates: Date[]; rruleStr: string | null } {
-  const dtstart = new Date(input.due_at);
+  const dtstart = istDate(input.due_at);
   if (input.recur === 'none') return { dates: [dtstart], rruleStr: null };
 
   let rule: RRule;
@@ -113,6 +121,15 @@ export async function createTask(formData: FormData): Promise<{ error?: string }
     return { error: isCompanyWide
       ? 'Tüm şirkete görev atamayı yalnızca adminler yapabilir.'
       : 'Bu departmana görev atama yetkiniz yok.' };
+  }
+
+  if (isNaN(istDate(input.due_at).getTime())) return { error: 'Geçersiz bitiş tarihi.' };
+
+  // güvenlik: atananlar bu şirketin kullanıcıları olmalı
+  const { data: validAssignees } = await supabase
+    .from('profiles').select('id').eq('company_id', companyId).in('id', input.assignees);
+  if ((validAssignees ?? []).length !== input.assignees.length) {
+    return { error: 'Seçilen kişilerden bazıları bu şirkette bulunamadı.' };
   }
 
   const { dates, rruleStr } = buildOccurrences(input);
@@ -236,18 +253,37 @@ export async function createTemplate(formData: FormData): Promise<{ error?: stri
 export async function instantiateTemplate(formData: FormData): Promise<{ error?: string } | never> {
   const templateId = String(formData.get('template_id') ?? '');
   const due_at = String(formData.get('due_at') ?? '');
-  const assignees = formData.getAll('assignees').map(String);
+  const assignees = formData.getAll('assignees').map(String)
+    .filter(a => z.string().uuid().safeParse(a).success);
   if (!templateId || !due_at || assignees.length === 0) {
     return { error: 'Tarih ve en az bir kişi seçin.' };
   }
 
-  const { supabase, profile, companyId } = await getCtx();
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
   const { data: tpl } = await supabase.from('templates').select('*').eq('id', templateId).single();
-  if (!tpl) return { error: 'Şablon bulunamadı.' };
+  if (!tpl || tpl.company_id !== companyId) return { error: 'Şablon bulunamadı.' };
+
+  // yetki: admin, ya da şablonun departmanını yöneten müdür
+  const canUse = ['super_admin', 'admin'].includes(profile.role) ||
+    (tpl.department_id
+      ? managedDepartmentIds.includes(tpl.department_id)
+      : managedDepartmentIds.length > 0);
+  if (!canUse) return { error: 'Bu şablondan görev oluşturma yetkiniz yok.' };
+
+  // güvenlik: atananlar bu şirketin kullanıcıları olmalı
+  const { data: validAssignees } = await supabase
+    .from('profiles').select('id').eq('company_id', companyId).in('id', assignees);
+  if ((validAssignees ?? []).length !== assignees.length) {
+    return { error: 'Seçilen kişilerden bazıları bu şirkette bulunamadı.' };
+  }
+
   const { data: tplItems } = await supabase
     .from('template_items').select('*').eq('template_id', templateId).order('position');
+
+  const dueDate = istDate(due_at);
+  if (isNaN(dueDate.getTime())) return { error: 'Geçersiz tarih.' };
 
   const { data: task, error } = await supabase.from('tasks').insert({
     company_id: companyId,
@@ -256,7 +292,7 @@ export async function instantiateTemplate(formData: FormData): Promise<{ error?:
     description: tpl.description,
     type: tpl.type,
     created_by: profile.id,
-    due_at: new Date(due_at).toISOString(),
+    due_at: dueDate.toISOString(),
     priority: tpl.default_priority,
     requires_photo: tpl.requires_photo,
     requires_approval: tpl.requires_approval,
@@ -264,13 +300,16 @@ export async function instantiateTemplate(formData: FormData): Promise<{ error?:
   }).select().single();
   if (error) return { error: error.message };
 
-  await supabase.from('task_assignees').insert(assignees.map(uid => ({ task_id: task.id, user_id: uid })));
+  const { error: aErr } = await supabase.from('task_assignees')
+    .insert(assignees.map(uid => ({ task_id: task.id, user_id: uid })));
+  if (aErr) return { error: `Atama yapılamadı: ${aErr.message}` };
   if (tplItems?.length) {
-    await supabase.from('checklist_items').insert(
+    const { error: iErr } = await supabase.from('checklist_items').insert(
       tplItems.map((it: any) => ({
         task_id: task.id, title: it.title, position: it.position, requires_photo: it.requires_photo
       }))
     );
+    if (iErr) return { error: `Checklist oluşturulamadı: ${iErr.message}` };
   }
   await supabase.from('notifications').insert(
     assignees.map(uid => ({
@@ -284,5 +323,26 @@ export async function instantiateTemplate(formData: FormData): Promise<{ error?:
     url: `/tasks/${task.id}`
   }).catch(() => {});
   revalidatePath('/home');
+  revalidatePath('/manage/tasks');
   redirect(`/tasks/${task.id}`);
+}
+
+/** Delete a template (its items cascade). Admin, or manager of its department. */
+export async function deleteTemplate(templateId: string) {
+  if (!z.string().uuid().safeParse(templateId).success) return { error: 'Geçersiz şablon.' };
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const { data: tpl } = await supabase.from('templates')
+    .select('id, company_id, department_id').eq('id', templateId).maybeSingle();
+  if (!tpl || tpl.company_id !== companyId) return { error: 'Şablon bulunamadı.' };
+
+  const canDelete = ['super_admin', 'admin'].includes(profile.role) ||
+    (tpl.department_id ? managedDepartmentIds.includes(tpl.department_id) : false);
+  if (!canDelete) return { error: 'Bu şablonu silme yetkiniz yok.' };
+
+  const { error } = await supabase.from('templates').delete().eq('id', templateId);
+  if (error) return { error: error.message };
+  revalidatePath('/manage/templates');
+  return { ok: true };
 }
