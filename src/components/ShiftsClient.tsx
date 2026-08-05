@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Trash2, X, Repeat } from 'lucide-react';
 import { addShift, deleteShift, deleteShiftSeries } from '@/app/(app)/hr/actions';
+import PrintButton, { type PrintTable } from '@/components/PrintButton';
 
 export interface ShiftRow {
   id: string; user_id: string; name: string; dept: string | null;
@@ -75,6 +76,35 @@ export default function ShiftsClient({
     return inDept.length ? inDept : people;
   }, [deptId, people, memberships]);
 
+  // ---------- print / PDF ----------
+  const fmtDay = (d: string) => new Date(d + 'T12:00:00').toLocaleDateString('tr-TR', {
+    weekday: 'short', day: 'numeric', month: 'short'
+  });
+  const printTable: PrintTable = useMemo(() => {
+    if (view === 'week' && isManager) {
+      return {
+        title: 'Vardiya Planı — Haftalık',
+        subtitle: `${fmtDay(days[0])} – ${fmtDay(days[6])}`,
+        landscape: true,
+        headers: ['Personel', ...dayLabels],
+        rows: people.map(p => [
+          p.full_name + (p.id === meId ? ' (siz)' : ''),
+          ...days.map(d =>
+            visible.filter(s => s.user_id === p.id && s.day === d)
+              .map(s => s.t + (s.note ? `\n${s.note}` : '')).join('\n') || '—')
+        ])
+      };
+    }
+    const sorted = [...visible].sort((a, b) =>
+      a.day === b.day ? a.starts_at.localeCompare(b.starts_at) : a.day.localeCompare(b.day));
+    return {
+      title: view === 'month' ? 'Vardiya Listesi — Aylık' : 'Vardiya Programım',
+      subtitle: sorted.length ? `${fmtDay(sorted[0].day)} – ${fmtDay(sorted[sorted.length - 1].day)}` : undefined,
+      headers: ['Tarih', 'Saat', 'Personel', 'Departman', 'Not'],
+      rows: sorted.map(s => [fmtDay(s.day), s.t, s.name, s.dept ?? '—', s.note ?? '—'])
+    };
+  }, [view, isManager, days, dayLabels, people, visible, meId]);
+
   function openPlanner(userId?: string, date?: string) {
     setPrefill({ userId, date });
     setPlannerOpen(true);
@@ -113,11 +143,14 @@ export default function ShiftsClient({
       {error && <p className="text-[13px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2">{error}</p>}
       {ok && <p className="text-[13px] text-emerald-300 bg-emerald-500/10 rounded-xl px-3 py-2">✔ {ok}</p>}
 
-      {isManager && !plannerOpen && (
-        <button onClick={() => openPlanner()} className="btn-primary">
-          <Plus size={16} /> Vardiya Planla
-        </button>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {isManager && !plannerOpen && (
+          <button onClick={() => openPlanner()} className="btn-primary">
+            <Plus size={16} /> Vardiya Planla
+          </button>
+        )}
+        <PrintButton table={printTable} />
+      </div>
 
       {/* ---------- PLANNER ---------- */}
       {isManager && plannerOpen && (

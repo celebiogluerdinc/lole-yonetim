@@ -10,6 +10,7 @@ import {
 import { TZ } from '@/lib/utils';
 import { managerSetTaskStatus } from '@/app/(app)/tasks/actions';
 import AutoRefresh from '@/components/AutoRefresh';
+import PrintButton, { type PrintTable } from '@/components/PrintButton';
 
 interface Row {
   id: string; title: string; type: string; status: string; priority: string;
@@ -105,6 +106,25 @@ export default function TaskBoard({
     ? new Date(iso).toLocaleString('tr-TR', { timeZone: TZ, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : '—';
 
+  const printTable: PrintTable = useMemo(() => {
+    const filterLabel = FILTERS.find(f => f.key === filter)?.label ?? '';
+    const deptLabel = dept ? (departments.find(d => d.id === dept)?.name ?? '') : 'Tüm departmanlar';
+    return {
+      title: 'Görev Listesi',
+      subtitle: `Filtre: ${filterLabel} · ${deptLabel}${q ? ` · Arama: "${q}"` : ''}`,
+      landscape: true,
+      headers: ['Görev', 'Durum', 'Bitiş', 'Departman', 'Atananlar', 'İlerleme'],
+      rows: filtered.map(r => [
+        r.title,
+        BADGE[effRow(r)]?.label ?? effRow(r),
+        fmtDue(r.due_at),
+        r.department ?? '—',
+        r.assignees.length ? r.assignees.join(', ') : 'Atanmamış',
+        r.progress ? `${r.progress.done}/${r.progress.total}` : '—'
+      ])
+    };
+  }, [filtered, filter, dept, q, departments, override]);
+
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-8 space-y-5">
       <AutoRefresh seconds={15} />
@@ -116,9 +136,12 @@ export default function TaskBoard({
             Canlı takip · {counts.active} aktif / {rows.length} toplam
           </p>
         </div>
-        <Link href="/manage/tasks/new" className="btn-primary shrink-0">
-          <Plus size={16} /> Yeni Görev
-        </Link>
+        <div className="flex items-center gap-2 shrink-0">
+          <PrintButton table={printTable} label="PDF" />
+          <Link href="/manage/tasks/new" className="btn-primary">
+            <Plus size={16} /> Yeni Görev
+          </Link>
+        </div>
       </header>
 
       {actionErr && (
