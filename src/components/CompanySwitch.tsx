@@ -10,7 +10,7 @@ export default function CompanySwitch({ companyId, isActive }: { companyId: stri
     <button
       disabled={pending || isActive}
       onClick={() => start(async () => { await switchCompany(companyId); })}
-      className={isActive ? 'btn-outline w-full !text-brand-600 !border-brand-200' : 'btn-primary w-full'}
+      className={isActive ? 'btn-outline w-full !text-brand-600 !border-brand-500/30' : 'btn-primary w-full'}
     >
       <LogIn size={15} />
       {isActive ? 'Aktif şirket' : 'Bu şirkete gir'}

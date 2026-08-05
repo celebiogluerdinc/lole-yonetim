@@ -52,9 +52,9 @@ export default function NewUserForm({
       })}
       className="card p-5 space-y-4 border border-ios-blue/20"
     >
-      {error && <p className="text-sm text-rose-600 bg-rose-50 rounded-xl px-3 py-2">{error}</p>}
+      {error && <p className="text-sm text-rose-300 bg-rose-500/10 rounded-xl px-3 py-2">{error}</p>}
       {ok && (
-        <p className="text-sm text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2">
+        <p className="text-sm text-emerald-300 bg-emerald-500/10 rounded-xl px-3 py-2">
           ✔ Kullanıcı oluşturuldu. Giriş bilgileri: <b>{ok}</b> + belirlediğiniz parola.
           Bu bilgileri kendisine iletin.
         </p>
@@ -98,10 +98,10 @@ export default function NewUserForm({
       <div className="grid sm:grid-cols-2 gap-4">
         <div>
           <label className="label">Üye olduğu departmanlar</label>
-          <div className="rounded-xl border border-black/[0.08] p-3 space-y-1.5 max-h-36 overflow-y-auto">
+          <div className="rounded-xl border border-white/[0.10] p-3 space-y-1.5 max-h-36 overflow-y-auto">
             {deptOptions.map(d => (
               <label key={d.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" name="departments" value={d.id} className="rounded accent-[#007AFF]" />
+                <input type="checkbox" name="departments" value={d.id} className="rounded accent-[#0A84FF]" />
                 {d.name}
               </label>
             ))}
@@ -109,10 +109,10 @@ export default function NewUserForm({
         </div>
         <div>
           <label className="label">Müdürü olduğu departmanlar</label>
-          <div className="rounded-xl border border-black/[0.08] p-3 space-y-1.5 max-h-36 overflow-y-auto">
+          <div className="rounded-xl border border-white/[0.10] p-3 space-y-1.5 max-h-36 overflow-y-auto">
             {deptOptions.map(d => (
               <label key={d.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" name="manager_departments" value={d.id} className="rounded accent-[#007AFF]" />
+                <input type="checkbox" name="manager_departments" value={d.id} className="rounded accent-[#0A84FF]" />
                 {d.name}
               </label>
             ))}

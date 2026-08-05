@@ -53,7 +53,7 @@ export default async function NotificationsPage() {
       <NotifAutoRead hasUnread={hasUnread} />
       <PushSetup />
 
-      <div className="card divide-y divide-black/[0.06] overflow-hidden">
+      <div className="card divide-y divide-white/[0.08] overflow-hidden">
         {(notifs ?? []).length === 0 && (
           <div className="p-10 text-center">
             <p className="text-3xl mb-2">🔕</p>
@@ -83,7 +83,7 @@ export default async function NotificationsPage() {
               {!n.read_at && <span className="w-2.5 h-2.5 rounded-full bg-ios-blue shrink-0 mt-1" />}
             </>
           );
-          const cls = 'flex items-start gap-3 px-4 py-3 hover:bg-black/[0.02] transition-colors';
+          const cls = 'flex items-start gap-3 px-4 py-3 hover:bg-[#1C1C1E]/[0.04] transition-colors';
           return href
             ? <Link key={n.id} href={href} className={cls}>{inner}</Link>
             : <div key={n.id} className={cls}>{inner}</div>;

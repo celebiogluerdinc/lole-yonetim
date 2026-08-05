@@ -25,7 +25,7 @@ export default function NewDepartmentForm() {
       <button className="btn-primary shrink-0" disabled={pending}>
         {pending ? 'Ekleniyor…' : 'Departman Ekle'}
       </button>
-      {error && <p className="text-sm text-rose-600 self-center">{error}</p>}
+      {error && <p className="text-sm text-rose-300 self-center">{error}</p>}
     </form>
   );
 }

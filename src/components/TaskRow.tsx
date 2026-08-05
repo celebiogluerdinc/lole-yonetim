@@ -37,7 +37,7 @@ export default function TaskRow({
   const specialStatus = !['open', 'completed', 'in_progress'].includes(task.status);
 
   return (
-    <div className="flex items-start gap-3 px-4 py-2.5 hover:bg-black/[0.02] transition-colors">
+    <div className="flex items-start gap-3 px-4 py-2.5 hover:bg-[#1C1C1E]/[0.04] transition-colors">
       <button
         onClick={onTick}
         disabled={pending || done}
@@ -65,7 +65,7 @@ export default function TaskRow({
         </div>
         {progress && progress.total > 0 && (
           <div className="flex items-center gap-2 mt-1.5">
-            <div className="h-[5px] flex-1 max-w-[140px] rounded-full bg-black/[0.08] overflow-hidden">
+            <div className="h-[5px] flex-1 max-w-[140px] rounded-full bg-[#1C1C1E]/[0.12] overflow-hidden">
               <div
                 className="h-full bg-ios-blue rounded-full transition-all"
                 style={{ width: `${(progress.done / progress.total) * 100}%` }}

@@ -20,7 +20,7 @@ export default async function AssistantPage() {
           <h1 className="text-[22px] font-bold">Lole Asistan hazır, anahtar bekliyor</h1>
           <p className="text-[15px] text-[#8E8E93] mt-2 max-w-md mx-auto leading-relaxed">
             Yapay zeka özelliklerini açmak için <b>console.anthropic.com</b>&apos;dan bir API anahtarı alın
-            ve Vercel ortam değişkenlerine <code className="text-[13px] bg-black/5 px-1.5 py-0.5 rounded">ANTHROPIC_API_KEY</code> olarak
+            ve Vercel ortam değişkenlerine <code className="text-[13px] bg-[#1C1C1E]/10 px-1.5 py-0.5 rounded">ANTHROPIC_API_KEY</code> olarak
             ekleyip yeniden deploy edin.
           </p>
         </div>

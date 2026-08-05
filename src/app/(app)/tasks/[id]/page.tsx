@@ -45,7 +45,7 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold tracking-tight">{task.title}</h1>
-            {task.description && <p className="text-sm text-slate-600 mt-1.5 whitespace-pre-wrap">{task.description}</p>}
+            {task.description && <p className="text-sm text-[#B0B0B5] mt-1.5 whitespace-pre-wrap">{task.description}</p>}
           </div>
           <span className={`badge shrink-0 ${STATUS_COLOR[task.status as keyof typeof STATUS_COLOR]}`}>
             {STATUS_LABEL[task.status as keyof typeof STATUS_LABEL]}
@@ -59,7 +59,7 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
           </span>
           {dept?.name && <span className="text-[#8E8E93]">🏷 {dept.name}</span>}
           {task.requires_photo && (
-            <span className="text-amber-700 flex items-center gap-1"><Camera size={14} /> Fotoğraf zorunlu</span>
+            <span className="text-amber-300 flex items-center gap-1"><Camera size={14} /> Fotoğraf zorunlu</span>
           )}
           {task.requires_approval && (
             <span className="text-blue-700 flex items-center gap-1"><ShieldCheck size={14} /> Yönetici onaylı</span>
@@ -76,12 +76,12 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
         )}
 
         {task.status === 'blocked' && task.blocked_reason && (
-          <div className="mt-3 rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">
+          <div className="mt-3 rounded-xl bg-rose-500/10 border border-rose-500/30 px-3 py-2 text-sm text-rose-300">
             🚧 Engel: {task.blocked_reason}
           </div>
         )}
         {task.rejection_note && task.status === 'open' && (
-          <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+          <div className="mt-3 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-sm text-amber-300">
             ↩️ Reddedildi: {task.rejection_note}
           </div>
         )}

@@ -46,9 +46,9 @@ export default function AnnouncementComposer({
         if (r?.error) setError(r.error);
         else { ref.current?.reset(); setOpen(false); router.refresh(); }
       })}
-      className="card p-5 space-y-3 border-brand-200"
+      className="card p-5 space-y-3 border-brand-500/30"
     >
-      {error && <p className="text-sm text-rose-600">{error}</p>}
+      {error && <p className="text-sm text-rose-300">{error}</p>}
       <div>
         <label className="label">Başlık *</label>
         <input name="title" required className="input" placeholder="Duyuru başlığı"
@@ -59,7 +59,7 @@ export default function AnnouncementComposer({
           <label className="label !mb-0">İçerik *</label>
           {aiAvailable && (
             <button type="button" onClick={polish} disabled={aiPending}
-              className="flex items-center gap-1 text-[13px] font-semibold text-[#5E5CE6] disabled:opacity-40">
+              className="flex items-center gap-1 text-[13px] font-semibold text-[#9F9CFF] disabled:opacity-40">
               <Sparkles size={13} />
               {aiPending ? 'Düzenleniyor…' : 'Yapay zeka ile güzelleştir'}
             </button>

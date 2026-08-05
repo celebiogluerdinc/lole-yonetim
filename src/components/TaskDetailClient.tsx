@@ -45,16 +45,16 @@ export default function TaskDetailClient({
   return (
     <div className="space-y-5">
       {error && (
-        <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700">
+        <div className="rounded-xl bg-rose-500/10 border border-rose-500/30 px-4 py-3 text-sm text-rose-300">
           {error}
         </div>
       )}
 
       {/* Checklist */}
       {task.type === 'checklist' && (
-        <section className="card divide-y divide-slate-100">
+        <section className="card divide-y divide-white/[0.08]">
           <div className="p-4 pb-3">
-            <h2 className="font-semibold text-sm text-slate-700">
+            <h2 className="font-semibold text-sm text-[#D1D1D6]">
               Checklist — {items.filter(i => i.is_done).length}/{items.length}
             </h2>
           </div>
@@ -83,7 +83,7 @@ export default function TaskDetailClient({
       {/* Attachments */}
       <section className="card p-4">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-sm text-slate-700 flex items-center gap-2">
+          <h2 className="font-semibold text-sm text-[#D1D1D6] flex items-center gap-2">
             <Paperclip size={15} /> Fotoğraf & Dosyalar
           </h2>
           {!finished && (
@@ -117,8 +117,8 @@ export default function TaskDetailClient({
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
             {attachments.map(a => (
               <a key={a.id} href={a.url} target="_blank" rel="noreferrer"
-                 className={`relative block rounded-xl overflow-hidden border bg-slate-50 aspect-square ${
-                   canReview && a.ai_verdict === 'suspicious' ? 'border-amber-400 ring-2 ring-amber-200' : 'border-slate-200'}`}>
+                 className={`relative block rounded-xl overflow-hidden border bg-[#1C1C1E]/[0.06] aspect-square ${
+                   canReview && a.ai_verdict === 'suspicious' ? 'border-amber-400 ring-2 ring-amber-500/40' : 'border-white/10'}`}>
                 {a.mime_type?.startsWith('image/') && a.url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={a.url} alt={a.file_name} className="w-full h-full object-cover" />
@@ -135,7 +135,7 @@ export default function TaskDetailClient({
             ))}
           </div>
           {canReview && attachments.some(a => a.ai_verdict === 'suspicious') && (
-            <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-[13px] text-amber-800">
+            <div className="mt-3 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[13px] text-amber-300">
               ⚠️ <b>Yapay zeka kontrolü önerdi:</b>{' '}
               {attachments.filter(a => a.ai_verdict === 'suspicious').map(a => a.ai_note).filter(Boolean).join(' · ')
                 || 'İşaretli fotoğraflar göreve uygun görünmüyor olabilir.'}{' '}
@@ -148,10 +148,10 @@ export default function TaskDetailClient({
 
       {/* Notes */}
       <section className="card p-4">
-        <h2 className="font-semibold text-sm text-slate-700 mb-3">Notlar</h2>
+        <h2 className="font-semibold text-sm text-[#D1D1D6] mb-3">Notlar</h2>
         <ul className="space-y-2 mb-3">
           {notes.map(n => (
-            <li key={n.id} className="rounded-xl bg-slate-50 px-3 py-2">
+            <li key={n.id} className="rounded-xl bg-[#1C1C1E]/[0.06] px-3 py-2">
               <p className="text-sm whitespace-pre-wrap">{n.body}</p>
               <p className="text-[11px] text-[#AEAEB2] mt-0.5">
                 {n.profiles?.full_name} · {fmtDate(n.created_at)}
@@ -186,7 +186,7 @@ export default function TaskDetailClient({
           <button
             disabled={pending}
             onClick={() => setBlockOpen(v => !v)}
-            className="btn-outline !py-3 text-rose-600 !border-rose-200 hover:!bg-rose-50"
+            className="btn-outline !py-3 text-rose-300 !border-rose-500/30 hover:!bg-rose-500/15"
           >
             <AlertTriangle size={16} /> Engel Bildir
           </button>
@@ -203,7 +203,7 @@ export default function TaskDetailClient({
             if (!r?.error) setBlockOpen(false);
             return r;
           })}
-          className="card p-4 space-y-3 border-rose-200"
+          className="card p-4 space-y-3 border-rose-500/30"
         >
           <label className="label">Engel nedir? (yöneticinize iletilecek)</label>
           <textarea name="reason" required rows={2} className="input" placeholder="Örn: Temizlik malzemesi bitti, depo kilitli…" />
@@ -213,15 +213,15 @@ export default function TaskDetailClient({
 
       {/* Manager review */}
       {inReview && canReview && (
-        <div className="card p-4 border-amber-200 bg-amber-50/50 space-y-3">
-          <p className="text-sm font-medium text-amber-900">Bu görev onayınızı bekliyor.</p>
+        <div className="card p-4 border-amber-500/30 bg-amber-500/10 space-y-3">
+          <p className="text-sm font-medium text-amber-200">Bu görev onayınızı bekliyor.</p>
           <div className="flex gap-2">
             <button disabled={pending} onClick={() => run(() => reviewTask(task.id, true))}
               className="btn-primary flex-1 !bg-emerald-600 hover:!bg-emerald-700">
               <ThumbsUp size={15} /> Onayla
             </button>
             <button disabled={pending} onClick={() => setRejectOpen(v => !v)}
-              className="btn-outline flex-1 text-rose-600 !border-rose-200">
+              className="btn-outline flex-1 text-rose-300 !border-rose-500/30">
               <ThumbsDown size={15} /> Reddet
             </button>
           </div>
@@ -238,7 +238,7 @@ export default function TaskDetailClient({
         </div>
       )}
       {inReview && !canReview && (
-        <p className="text-sm text-center text-amber-700 bg-amber-50 rounded-xl py-3">
+        <p className="text-sm text-center text-amber-300 bg-amber-500/10 rounded-xl py-3">
           ⏳ Yönetici onayı bekleniyor.
         </p>
       )}

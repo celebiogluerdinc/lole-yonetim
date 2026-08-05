@@ -61,11 +61,11 @@ export default async function CalendarPage({
       {isManager && (
         <div className="flex gap-1.5 mb-5">
           <Link href={`/calendar?m=${y}-${m}&scope=mine`}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === 'mine' ? 'bg-ios-blue text-white' : 'bg-white text-[#3a3a3c]'}`}>
+            className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === 'mine' ? 'bg-ios-blue text-white' : 'bg-[#1C1C1E] text-[#D1D1D6]'}`}>
             Benim ajandam
           </Link>
           <Link href={`/calendar?m=${y}-${m}&scope=team`}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === 'team' ? 'bg-ios-blue text-white' : 'bg-white text-[#3a3a3c]'}`}>
+            className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === 'team' ? 'bg-ios-blue text-white' : 'bg-[#1C1C1E] text-[#D1D1D6]'}`}>
             Ekip takvimi
           </Link>
         </div>
@@ -79,10 +79,10 @@ export default async function CalendarPage({
         {Object.entries(byDay).map(([day, list]) => (
           <section key={day}>
             <h2 className="text-sm font-semibold text-[#8E8E93] mb-2 capitalize">{day}</h2>
-            <div className="card divide-y divide-slate-100">
+            <div className="card divide-y divide-white/[0.08]">
               {list.map(t => (
                 <Link key={t.id} href={`/tasks/${t.id}`}
-                  className="flex items-center gap-3 p-3.5 hover:bg-slate-50 transition-colors">
+                  className="flex items-center gap-3 p-3.5 hover:bg-[#1C1C1E]/[0.04] transition-colors">
                   <span className="text-xs font-semibold text-ios-blue w-12 shrink-0">
                     {new Date(t.due_at).toLocaleTimeString('tr-TR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' })}
                   </span>

@@ -15,10 +15,10 @@ const TYPE_LABEL: Record<string, string> = {
   annual: '🏖 Yıllık izin', sick: '🤒 Hastalık', unpaid: '📄 Ücretsiz', other: '📌 Diğer'
 };
 const STATUS: Record<string, { label: string; cls: string }> = {
-  pending: { label: 'Bekliyor', cls: 'bg-amber-100 text-amber-800' },
-  approved: { label: 'Onaylandı', cls: 'bg-emerald-100 text-emerald-700' },
-  rejected: { label: 'Reddedildi', cls: 'bg-rose-100 text-rose-700' },
-  cancelled: { label: 'İptal', cls: 'bg-slate-100 text-slate-400' }
+  pending: { label: 'Bekliyor', cls: 'bg-amber-500/20 text-amber-300' },
+  approved: { label: 'Onaylandı', cls: 'bg-emerald-500/20 text-emerald-300' },
+  rejected: { label: 'Reddedildi', cls: 'bg-rose-500/20 text-rose-300' },
+  cancelled: { label: 'İptal', cls: 'bg-white/10 text-[#8E8E93]' }
 };
 
 const fd = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' });
@@ -54,7 +54,7 @@ export default function LeaveClient({
         <button onClick={() => setOpen(v => !v)} className="btn-primary"><Plus size={16} /> İzin Talep Et</button>
       </header>
 
-      {error && <p className="text-[13px] text-ios-red bg-rose-50 rounded-xl px-3 py-2">{error}</p>}
+      {error && <p className="text-[13px] text-ios-red bg-rose-500/10 rounded-xl px-3 py-2">{error}</p>}
 
       {open && (
         <form
@@ -96,7 +96,7 @@ export default function LeaveClient({
       {isManager && pendingTeam.length > 0 && (
         <section>
           <h2 className="section-title" style={{ color: '#FF9500' }}>Onay Bekleyen Talepler</h2>
-          <div className="card divide-y divide-black/[0.06] overflow-hidden">
+          <div className="card divide-y divide-white/[0.08] overflow-hidden">
             {pendingTeam.map(r => (
               <div key={r.id} className="px-4 py-3 space-y-2">
                 <div className="flex items-start justify-between gap-2">
@@ -137,7 +137,7 @@ export default function LeaveClient({
       {/* My requests */}
       <section>
         <h2 className="section-title">Taleplerim</h2>
-        <div className="card divide-y divide-black/[0.06] overflow-hidden">
+        <div className="card divide-y divide-white/[0.08] overflow-hidden">
           {mine.length === 0 && (
             <p className="p-8 text-center text-[15px] text-[#8E8E93]">Henüz izin talebiniz yok.</p>
           )}
@@ -164,7 +164,7 @@ export default function LeaveClient({
       {isManager && others.length > 0 && (
         <section>
           <h2 className="section-title">Ekip İzin Geçmişi</h2>
-          <div className="card divide-y divide-black/[0.06] overflow-hidden">
+          <div className="card divide-y divide-white/[0.08] overflow-hidden">
             {others.slice(0, 20).map(r => (
               <div key={r.id} className="flex items-center gap-3 px-4 py-2.5">
                 <span className="flex-1 min-w-0">

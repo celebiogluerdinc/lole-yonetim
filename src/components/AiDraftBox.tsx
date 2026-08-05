@@ -20,7 +20,7 @@ export default function AiDraftBox({
   const [pending, start] = useTransition();
 
   return (
-    <div className="card p-4 border border-[#5E5CE6]/20 bg-gradient-to-br from-[#5E5CE6]/[0.04] to-[#AF52DE]/[0.04]">
+    <div className="card p-4 border border-[#5E5CE6]/40 bg-gradient-to-br from-[#5E5CE6]/[0.18] to-[#AF52DE]/[0.18]">
       <div className="flex items-center gap-2 mb-2.5">
         <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#5E5CE6] to-[#AF52DE] text-white flex items-center justify-center shrink-0">
           <Sparkles size={14} />
@@ -32,7 +32,7 @@ export default function AiDraftBox({
         onChange={e => setText(e.target.value)}
         rows={2}
         placeholder={placeholder}
-        className="input !bg-white"
+        className="input !bg-[#2C2C2E]"
       />
       {hint && <p className="text-[12px] text-[#8E8E93] mt-1.5">{hint}</p>}
       {error && <p className="text-[13px] text-ios-red mt-1.5">{error}</p>}

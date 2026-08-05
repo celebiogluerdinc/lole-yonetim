@@ -71,7 +71,7 @@ export default function ChatThread({
   return (
     <div className="flex flex-col h-[calc(100dvh-4.5rem)] md:h-dvh max-w-3xl mx-auto w-full">
       {/* Header */}
-      <header className="flex items-center gap-2 px-3 py-2.5 bg-[#F2F2F7]/90 backdrop-blur sticky top-0 z-10 border-b border-black/[0.06]">
+      <header className="flex items-center gap-2 px-3 py-2.5 bg-black/80 backdrop-blur sticky top-0 z-10 border-b border-white/[0.08]">
         <Link href="/messages" className="flex items-center text-ios-blue text-[16px] -ml-1">
           <ChevronLeft size={24} strokeWidth={2.4} />
         </Link>
@@ -105,7 +105,7 @@ export default function ChatThread({
                     <div className={`px-3.5 py-2 text-[16px] leading-snug whitespace-pre-wrap break-words rounded-2xl ${
                       mine
                         ? 'bg-ios-blue text-white rounded-br-[6px]'
-                        : 'bg-[#E9E9EB] text-[#1c1c1e] rounded-bl-[6px]'
+                        : 'bg-[#2C2C2E] text-[#F2F2F7] rounded-bl-[6px]'
                     }`}>
                       {m.body}
                     </div>
@@ -124,13 +124,13 @@ export default function ChatThread({
       {/* Composer */}
       <form
         onSubmit={(e) => { e.preventDefault(); onSend(); }}
-        className="flex items-center gap-2 px-3 py-2.5 bg-[#F2F2F7]/95 backdrop-blur border-t border-black/[0.06]"
+        className="flex items-center gap-2 px-3 py-2.5 bg-black/85 backdrop-blur border-t border-white/[0.08]"
       >
         <input
           value={text}
           onChange={e => setText(e.target.value)}
           placeholder="Mesaj"
-          className="flex-1 rounded-full bg-white border border-black/[0.08] px-4 py-2 text-[16px] outline-none focus:border-ios-blue/40"
+          className="flex-1 rounded-full bg-[#1C1C1E] border border-white/[0.10] px-4 py-2 text-[16px] outline-none focus:border-ios-blue/40"
         />
         <button
           type="submit"

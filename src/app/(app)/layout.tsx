@@ -37,7 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/shifts', label: 'Vardiyalar', icon: 'shift', show: true, badge: 0 },
     { href: '/leave', label: 'İzinler', icon: 'leave', show: true, badge: 0 },
     { href: '/clock', label: 'Mesai', icon: 'clock', show: true, badge: 0 },
-    { href: '/manage/tasks/new', label: 'Görev Oluştur', icon: 'plus', show: isManagerRole, badge: 0 },
+    { href: '/manage/tasks', label: 'Görevler', icon: 'tasks', show: isManagerRole, badge: 0 },
     { href: '/manage/templates', label: 'Şablonlar', icon: 'template', show: isManagerRole, badge: 0 },
     { href: '/admin/users', label: 'Kullanıcılar', icon: 'users', show: isAdminRole, badge: 0 },
     { href: '/admin/departments', label: 'Departmanlar', icon: 'building', show: isAdminRole, badge: 0 },
@@ -47,14 +47,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-dvh flex">
       {/* Sidebar — desktop (macOS Reminders style) */}
-      <aside className="hidden md:flex w-60 flex-col border-r border-black/[0.06] bg-[#F2F2F7] p-4 sticky top-0 h-dvh">
+      <aside className="hidden md:flex w-60 flex-col border-r border-white/[0.08] bg-[#141416] p-4 sticky top-0 h-dvh">
         <div className="flex items-center gap-2.5 px-2 mb-6">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-white flex items-center justify-center font-bold shadow-sm">
             L
           </div>
           <div className="min-w-0">
             <p className="font-semibold text-sm leading-tight truncate">{companyName}</p>
-            <p className="text-xs text-slate-400">Lole Yönetim</p>
+            <p className="text-xs text-[#8E8E93]">Lole Yönetim</p>
           </div>
         </div>
         <nav className="flex-1 space-y-1">
@@ -62,18 +62,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} />
           ))}
         </nav>
-        <div className="border-t border-black/[0.06] pt-3 mt-3">
+        <div className="border-t border-white/[0.08] pt-3 mt-3">
           <div className="flex items-center gap-2.5 px-3 pb-2">
             <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-xs font-bold shrink-0">
               {(profile.full_name || profile.email)[0]?.toUpperCase()}
             </div>
             <div className="min-w-0">
               <p className="text-sm font-medium truncate">{profile.full_name || profile.email}</p>
-              <p className="text-xs text-slate-400">{ROLE_LABEL[profile.role]}</p>
+              <p className="text-xs text-[#8E8E93]">{ROLE_LABEL[profile.role]}</p>
             </div>
           </div>
           <form action={logout}>
-            <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-[#8E8E93] hover:bg-black/5 transition-colors">
+            <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-[#8E8E93] hover:bg-[#1C1C1E]/10 transition-colors">
               <LogOut size={16} /> Çıkış yap
             </button>
           </form>
@@ -86,7 +86,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
 
       {/* Bottom bar — mobile */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white/80 backdrop-blur-xl border-t border-black/[0.08] flex justify-around py-1.5 z-40 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#1C1C1E]/85 backdrop-blur-xl border-t border-white/[0.10] flex justify-around py-1.5 z-40 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {nav.slice(0, 5).map(n => (
           <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} mobile />
         ))}

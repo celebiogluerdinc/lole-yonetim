@@ -77,7 +77,19 @@ export async function createTask(formData: FormData): Promise<{ error?: string }
     custom_rrule: String(formData.get('custom_rrule') ?? '')
   };
   const parsed = TaskSchema.safeParse(raw);
-  if (!parsed.success) return { error: 'Form eksik: başlık, departman, tarih ve en az bir kişi gereklidir.' };
+  if (!parsed.success) {
+    const FIELD_TR: Record<string, string> = {
+      title: 'Başlık', description: 'Açıklama', type: 'Görev türü',
+      department_id: 'Departman', due_at: 'Bitiş tarihi/saati', priority: 'Öncelik',
+      assignees: 'Atanacak kişiler', items: 'Checklist maddeleri', recur: 'Tekrar',
+      weekdays: 'Haftanın günleri', monthday: 'Ayın günü', interval: 'Aralık',
+      count: 'Tekrar sayısı', custom_rrule: 'Özel kural'
+    };
+    const fields = Array.from(new Set(
+      parsed.error.issues.map(i => FIELD_TR[String(i.path[0])] ?? String(i.path[0]))
+    )).join(', ');
+    return { error: `Şu alan(lar) eksik veya hatalı: ${fields}. Lütfen kontrol edip tekrar deneyin.` };
+  }
   const input = parsed.data;
   if (input.type === 'checklist' && input.items.length === 0) {
     return { error: 'Checklist için en az bir madde ekleyin.' };

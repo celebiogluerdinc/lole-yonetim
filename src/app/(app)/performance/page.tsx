@@ -32,14 +32,14 @@ const rate = (b: Bucket) => {
 
 /** Stacked status bar — green/orange/red segments with 2px gaps, gray remainder. */
 function StatusBar({ b }: { b: Bucket }) {
-  if (!b.total) return <div className="h-[6px] rounded-full bg-black/[0.06]" />;
+  if (!b.total) return <div className="h-[6px] rounded-full bg-[#1C1C1E]/[0.10]" />;
   const seg = (n: number) => `${(n / b.total) * 100}%`;
   return (
     <div className="flex h-[6px] rounded-full overflow-hidden gap-[2px]">
       {b.onTime > 0 && <span style={{ width: seg(b.onTime), backgroundColor: '#34C759' }} />}
       {b.late > 0 && <span style={{ width: seg(b.late), backgroundColor: '#FF9500' }} />}
       {b.missed > 0 && <span style={{ width: seg(b.missed), backgroundColor: '#FF3B30' }} />}
-      {b.open > 0 && <span style={{ width: seg(b.open), backgroundColor: 'rgba(0,0,0,0.08)' }} />}
+      {b.open > 0 && <span style={{ width: seg(b.open), backgroundColor: 'rgba(255,255,255,0.14)' }} />}
     </div>
   );
 }
@@ -161,7 +161,7 @@ export default async function PerformancePage({
       {aiReport && (
         <section>
           <h2 className="section-title" style={{ color: '#5E5CE6' }}>🤖 Haftalık AI Raporu</h2>
-          <div className="card p-5 border border-[#5E5CE6]/20 bg-gradient-to-br from-[#5E5CE6]/[0.04] to-[#AF52DE]/[0.04]">
+          <div className="card p-5 border border-[#5E5CE6]/40 bg-gradient-to-br from-[#5E5CE6]/[0.18] to-[#AF52DE]/[0.18]">
             <p className="text-[12px] text-[#8E8E93] mb-2">
               {new Date(aiReport.week_start).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })} haftası
             </p>
@@ -202,7 +202,7 @@ export default async function PerformancePage({
             <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: '#34C759' }} /> Zamanında {overall.onTime}</span>
             <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: '#FF9500' }} /> Geç {overall.late}</span>
             <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: '#FF3B30' }} /> Kaçırılan {overall.missed}</span>
-            <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: 'rgba(0,0,0,0.15)' }} /> Bekleyen {overall.open}</span>
+            <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: 'rgba(255,255,255,0.28)' }} /> Bekleyen {overall.open}</span>
           </div>
         </div>
       </section>
@@ -211,7 +211,7 @@ export default async function PerformancePage({
       {isManager && perPerson.length > 0 && (
         <section>
           <h2 className="section-title">Kişi Bazında</h2>
-          <div className="card divide-y divide-black/[0.06] overflow-hidden">
+          <div className="card divide-y divide-white/[0.08] overflow-hidden">
             {perPerson.map(p => {
               const r = rate(p.b);
               return (
@@ -235,7 +235,7 @@ export default async function PerformancePage({
       {isAdmin && perDept.length > 0 && (
         <section>
           <h2 className="section-title">Departman Bazında</h2>
-          <div className="card divide-y divide-black/[0.06] overflow-hidden">
+          <div className="card divide-y divide-white/[0.08] overflow-hidden">
             {perDept.map(d => {
               const r = rate(d.b);
               return (

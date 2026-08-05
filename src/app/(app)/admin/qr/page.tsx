@@ -27,7 +27,7 @@ export default async function QrPage() {
         <p className="text-[15px] text-[#8E8E93] mt-1">Mesai Giriş / Çıkış</p>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={dataUrl} alt="Mesai QR kodu" className="mx-auto my-6 w-64 h-64 rounded-xl" />
-        <p className="text-[14px] text-[#6d6d72] leading-relaxed max-w-sm mx-auto">
+        <p className="text-[14px] text-[#A8A8AD] leading-relaxed max-w-sm mx-auto">
           Telefonunuzun kamerasıyla bu kodu okutun, açılan sayfada
           <b> Giriş Yap</b> veya <b>Çıkış Yap</b>&apos;a dokunun.
         </p>

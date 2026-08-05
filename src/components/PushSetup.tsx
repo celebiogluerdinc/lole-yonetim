@@ -64,7 +64,7 @@ export default function PushSetup() {
         <span className="smart-icon !w-8 !h-8 shrink-0" style={{ backgroundColor: '#007AFF' }}>
           <BellRing size={15} />
         </span>
-        <p className="text-[13px] text-[#6d6d72] leading-relaxed">
+        <p className="text-[13px] text-[#A8A8AD] leading-relaxed">
           iPhone&apos;da anlık bildirim almak için: Safari&apos;de <b>Paylaş</b> düğmesine basıp{' '}
           <b>&quot;Ana Ekrana Ekle&quot;</b> deyin, ardından uygulamayı ana ekrandan açın.
         </p>
@@ -75,7 +75,7 @@ export default function PushSetup() {
   if (state === 'denied') {
     return (
       <div className="card p-4">
-        <p className="text-[13px] text-[#6d6d72]">
+        <p className="text-[13px] text-[#A8A8AD]">
           Bildirim izni reddedilmiş. Tarayıcı ayarlarından bu site için bildirimlere izin verirseniz anlık bildirim alabilirsiniz.
         </p>
       </div>
@@ -83,7 +83,7 @@ export default function PushSetup() {
   }
 
   return (
-    <button onClick={enable} className="card p-4 w-full flex items-center gap-3 text-left hover:bg-black/[0.02] transition-colors">
+    <button onClick={enable} className="card p-4 w-full flex items-center gap-3 text-left hover:bg-[#1C1C1E]/[0.04] transition-colors">
       <span className="smart-icon !w-9 !h-9 shrink-0" style={{ backgroundColor: '#FF3B30' }}>
         <BellRing size={17} />
       </span>

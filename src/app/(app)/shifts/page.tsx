@@ -87,7 +87,7 @@ export default async function ShiftsPage({
       {Object.entries(byDay).map(([day, list]) => (
         <section key={day}>
           <h2 className="section-title capitalize">{day}</h2>
-          <div className="card divide-y divide-black/[0.06] overflow-hidden">
+          <div className="card divide-y divide-white/[0.08] overflow-hidden">
             {list.map((s: any) => {
               const t = (x: string) => new Date(x).toLocaleTimeString('tr-TR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
               const mine = s.user_id === profile.id;

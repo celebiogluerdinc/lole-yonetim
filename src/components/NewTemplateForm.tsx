@@ -42,7 +42,7 @@ export default function NewTemplateForm({
       })}
       className="space-y-5"
     >
-      {error && <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700">{error}</div>}
+      {error && <div className="rounded-xl bg-rose-500/10 border border-rose-500/30 px-4 py-3 text-sm text-rose-300">{error}</div>}
 
       <div className="card p-5 space-y-4">
         <div className="segment">
@@ -82,7 +82,7 @@ export default function NewTemplateForm({
             </select>
           </div>
         </div>
-        <div className="divide-y divide-black/[0.06]">
+        <div className="divide-y divide-white/[0.08]">
           <label className="flex items-center justify-between py-2.5 cursor-pointer">
             <span className="text-[15px]">📷 Fotoğraf zorunlu</span>
             <input type="checkbox" name="requires_photo" className="switch"
@@ -106,7 +106,7 @@ export default function NewTemplateForm({
                     className="input" placeholder={`Madde ${i + 1}`} />
                   {items.length > 1 && (
                     <button type="button" onClick={() => setItems(arr => arr.filter((_, j) => j !== i))}
-                      className="btn-ghost !px-2 text-slate-400"><X size={16} /></button>
+                      className="btn-ghost !px-2 text-[#8E8E93]"><X size={16} /></button>
                   )}
                 </div>
               ))}

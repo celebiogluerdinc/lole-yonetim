@@ -32,7 +32,7 @@ export default function ClockClient({
         <div>
           <h1 className="text-[28px] leading-tight font-bold tracking-tight">Mesai</h1>
           <p className="text-[14px] text-[#8E8E93]">
-            Bu hafta toplam <b className="text-[#1c1c1e]">{weekTotal} saat</b>
+            Bu hafta toplam <b className="text-[#F2F2F7]">{weekTotal} saat</b>
           </p>
         </div>
         {isAdmin && (
@@ -40,7 +40,7 @@ export default function ClockClient({
         )}
       </header>
 
-      {error && <p className="text-[13px] text-ios-red bg-rose-50 rounded-xl px-3 py-2">{error}</p>}
+      {error && <p className="text-[13px] text-ios-red bg-rose-500/10 rounded-xl px-3 py-2">{error}</p>}
 
       {/* Big clock button */}
       <div className="card p-6 text-center">
@@ -50,7 +50,7 @@ export default function ClockClient({
             <button
               disabled={pending}
               onClick={() => run(() => clockOut())}
-              className="mt-4 w-40 h-40 mx-auto rounded-full bg-ios-red text-white flex flex-col items-center justify-center gap-1 shadow-lg shadow-rose-200 active:scale-95 transition-transform"
+              className="mt-4 w-40 h-40 mx-auto rounded-full bg-ios-red text-white flex flex-col items-center justify-center gap-1 shadow-lg shadow-rose-900/50 active:scale-95 transition-transform"
             >
               <LogOut size={34} />
               <span className="text-[17px] font-bold">Çıkış Yap</span>
@@ -64,7 +64,7 @@ export default function ClockClient({
             <button
               disabled={pending}
               onClick={() => run(() => clockIn(viaQr ? 'qr' : 'manual'))}
-              className="mt-4 w-40 h-40 mx-auto rounded-full bg-ios-green text-white flex flex-col items-center justify-center gap-1 shadow-lg shadow-emerald-200 active:scale-95 transition-transform"
+              className="mt-4 w-40 h-40 mx-auto rounded-full bg-ios-green text-white flex flex-col items-center justify-center gap-1 shadow-lg shadow-emerald-900/50 active:scale-95 transition-transform"
             >
               <LogIn size={34} />
               <span className="text-[17px] font-bold">Giriş Yap</span>
@@ -81,7 +81,7 @@ export default function ClockClient({
       {/* My entries */}
       <section>
         <h2 className="section-title">Son Kayıtlarım</h2>
-        <div className="card divide-y divide-black/[0.06] overflow-hidden">
+        <div className="card divide-y divide-white/[0.08] overflow-hidden">
           {rows.length === 0 && (
             <p className="p-8 text-center text-[15px] text-[#8E8E93]">Henüz mesai kaydınız yok.</p>
           )}
@@ -105,7 +105,7 @@ export default function ClockClient({
       {isManager && (
         <section>
           <h2 className="section-title">Bugün Ekip</h2>
-          <div className="card divide-y divide-black/[0.06] overflow-hidden">
+          <div className="card divide-y divide-white/[0.08] overflow-hidden">
             {team.length === 0 && (
               <p className="p-6 text-center text-[14px] text-[#8E8E93]">Bugün ekipten mesai kaydı yok.</p>
             )}

@@ -35,15 +35,15 @@ export default async function DepartmentsPage() {
             <h3 className="font-semibold flex items-center gap-2">
               <Building2 size={16} className="text-ios-blue" />
               {d.name}
-              {d.is_preset && <span className="badge bg-slate-100 text-[#8E8E93]">Hazır</span>}
+              {d.is_preset && <span className="badge bg-white/10 text-[#8E8E93]">Hazır</span>}
             </h3>
             <div className="mt-3 space-y-1 text-sm">
               <p className="text-[#8E8E93]">
-                <span className="font-medium text-slate-700">Müdür:</span>{' '}
+                <span className="font-medium text-[#D1D1D6]">Müdür:</span>{' '}
                 {byDept[d.id]?.managers.join(', ') || '—'}
               </p>
               <p className="text-[#8E8E93]">
-                <span className="font-medium text-slate-700">Üyeler:</span>{' '}
+                <span className="font-medium text-[#D1D1D6]">Üyeler:</span>{' '}
                 {byDept[d.id]?.members.join(', ') || '—'}
               </p>
             </div>

@@ -74,7 +74,7 @@ export default function NewTaskForm({
         })}
         className="space-y-5"
       >
-        {error && <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700">{error}</div>}
+        {error && <div className="rounded-xl bg-rose-500/10 border border-rose-500/30 px-4 py-3 text-sm text-rose-300">{error}</div>}
 
         <div className="card p-5 space-y-4">
           {/* Type — iOS segmented control */}
@@ -175,7 +175,7 @@ export default function NewTaskForm({
                       }
                     });
                   }}
-                  className="flex items-center gap-1 text-[13px] font-semibold text-[#5E5CE6] disabled:opacity-40"
+                  className="flex items-center gap-1 text-[13px] font-semibold text-[#9F9CFF] disabled:opacity-40"
                 >
                   <Sparkles size={13} />
                   {suggestPending ? 'Hesaplanıyor…' : 'Kime verelim?'}
@@ -183,23 +183,23 @@ export default function NewTaskForm({
               )}
             </div>
             {suggestion && (
-              <p className="text-[13px] text-[#5E5CE6] bg-[#5E5CE6]/[0.07] rounded-xl px-3 py-2 mb-2">
+              <p className="text-[13px] text-[#9F9CFF] bg-[#5E5CE6]/[0.18] rounded-xl px-3 py-2 mb-2">
                 ✨ {suggestion.reason}
               </p>
             )}
-            <div className="grid sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto rounded-xl border border-black/[0.08] p-3">
+            <div className="grid sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto rounded-xl border border-white/[0.10] p-3">
               {deptPeople.map(p => (
                 <label key={p.id} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
                   <input type="checkbox" name="assignees" value={p.id}
                     defaultChecked={isPreassigned(p)}
-                    className="rounded accent-[#007AFF] w-4 h-4" />
+                    className="rounded accent-[#0A84FF] w-4 h-4" />
                   <span className="truncate">{p.full_name}</span>
                 </label>
               ))}
             </div>
           </div>
 
-          <div className="divide-y divide-black/[0.06]">
+          <div className="divide-y divide-white/[0.08]">
             <label className="flex items-center justify-between py-2.5 cursor-pointer">
               <span className="text-[15px]">📷 Fotoğraf zorunlu</span>
               <input type="checkbox" name="requires_photo" className="switch"
@@ -220,7 +220,7 @@ export default function NewTaskForm({
             {([['none', 'Tek seferlik'], ['daily', 'Günlük'], ['weekly', 'Haftalık'], ['monthly', 'Aylık'], ['custom', 'Özel']] as const).map(([k, l]) => (
               <button key={k} type="button" onClick={() => setRecur(k)}
                 className={`rounded-full px-4 py-1.5 text-[13px] font-semibold transition-colors ${
-                  recur === k ? 'bg-ios-blue text-white' : 'bg-ios-fill text-[#1c1c1e] hover:bg-black/10'}`}>
+                  recur === k ? 'bg-ios-blue text-white' : 'bg-ios-fill text-[#F2F2F7] hover:bg-[#1C1C1E]/15'}`}>
                 {l}
               </button>
             ))}

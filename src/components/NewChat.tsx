@@ -23,11 +23,11 @@ export default function NewChat({ people }: { people: Person[] }) {
       {open && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 backdrop-blur-[2px] p-0 sm:p-6"
           onClick={() => setOpen(false)}>
-          <div className="bg-[#F2F2F7] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[85dvh] flex flex-col"
+          <div className="bg-[#141416] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[85dvh] flex flex-col"
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 pt-4 pb-2">
               <h2 className="text-[17px] font-bold">Yeni Sohbet</h2>
-              <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-full bg-black/5 flex items-center justify-center text-[#8E8E93]">
+              <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-full bg-[#1C1C1E]/10 flex items-center justify-center text-[#8E8E93]">
                 <X size={16} />
               </button>
             </div>
@@ -45,7 +45,7 @@ export default function NewChat({ people }: { people: Person[] }) {
 
             <div className="overflow-y-auto px-4 pb-6">
               {tab === 'dm' ? (
-                <div className="card divide-y divide-black/[0.06] overflow-hidden">
+                <div className="card divide-y divide-white/[0.08] overflow-hidden">
                   {people.length === 0 && (
                     <p className="p-6 text-center text-[14px] text-[#8E8E93]">Şirkette başka kullanıcı yok.</p>
                   )}
@@ -56,7 +56,7 @@ export default function NewChat({ people }: { people: Person[] }) {
                         const r = await startDm(p.id);
                         if (r?.error) setError(r.error);
                       })}
-                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-black/[0.03] transition-colors text-left disabled:opacity-50">
+                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#1C1C1E]/[0.05] transition-colors text-left disabled:opacity-50">
                       <span className="w-9 h-9 rounded-full bg-ios-blue/10 text-ios-blue flex items-center justify-center font-semibold shrink-0">
                         {p.full_name[0]?.toUpperCase()}
                       </span>
@@ -73,12 +73,12 @@ export default function NewChat({ people }: { people: Person[] }) {
                   const r = await createGroup(fd);
                   if (r?.error) setError(r.error);
                 })} className="space-y-3">
-                  <input name="name" required placeholder="Grup adı" className="input !bg-white" />
-                  <div className="card divide-y divide-black/[0.06] overflow-hidden max-h-64 overflow-y-auto">
+                  <input name="name" required placeholder="Grup adı" className="input !bg-[#2C2C2E]" />
+                  <div className="card divide-y divide-white/[0.08] overflow-hidden max-h-64 overflow-y-auto">
                     {people.map(p => (
                       <label key={p.id} className="flex items-center justify-between px-4 py-2.5 cursor-pointer">
                         <span className="text-[15px]">{p.full_name}</span>
-                        <input type="checkbox" name="members" value={p.id} className="w-5 h-5 accent-[#007AFF]" />
+                        <input type="checkbox" name="members" value={p.id} className="w-5 h-5 accent-[#0A84FF]" />
                       </label>
                     ))}
                   </div>

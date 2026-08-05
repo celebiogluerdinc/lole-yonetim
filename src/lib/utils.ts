@@ -43,13 +43,13 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
 };
 
 export const STATUS_COLOR: Record<TaskStatus, string> = {
-  open: 'bg-slate-100 text-slate-700',
-  in_progress: 'bg-blue-100 text-blue-700',
-  pending_review: 'bg-amber-100 text-amber-800',
-  completed: 'bg-emerald-100 text-emerald-700',
-  blocked: 'bg-rose-100 text-rose-700',
-  overdue: 'bg-rose-100 text-rose-700',
-  cancelled: 'bg-slate-100 text-slate-400'
+  open: 'bg-white/10 text-[#D1D1D6]',
+  in_progress: 'bg-blue-500/20 text-blue-300',
+  pending_review: 'bg-amber-500/20 text-amber-300',
+  completed: 'bg-emerald-500/20 text-emerald-300',
+  blocked: 'bg-rose-500/20 text-rose-300',
+  overdue: 'bg-rose-500/20 text-rose-300',
+  cancelled: 'bg-white/10 text-[#8E8E93]'
 };
 
 export const PRIORITY_LABEL: Record<TaskPriority, string> = {
@@ -57,8 +57,8 @@ export const PRIORITY_LABEL: Record<TaskPriority, string> = {
 };
 
 export const PRIORITY_COLOR: Record<TaskPriority, string> = {
-  low: 'text-slate-400', normal: 'text-slate-500',
-  high: 'text-amber-600', urgent: 'text-rose-600'
+  low: 'text-[#8E8E93]', normal: 'text-[#98989E]',
+  high: 'text-amber-400', urgent: 'text-rose-400'
 };
 
 export const ROLE_LABEL: Record<string, string> = {

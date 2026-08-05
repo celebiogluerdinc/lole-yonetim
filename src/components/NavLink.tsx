@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import {
   Home, Calendar, Megaphone, PlusSquare, LayoutTemplate,
   Users, Building2, Landmark, MessageCircle, Bell, BarChart3, Sparkles,
-  CalendarClock, Plane, Clock, type LucideIcon
+  CalendarClock, Plane, Clock, ClipboardList, type LucideIcon
 } from 'lucide-react';
 
 const META: Record<string, { Icon: LucideIcon; color: string }> = {
@@ -16,6 +16,7 @@ const META: Record<string, { Icon: LucideIcon; color: string }> = {
   calendar: { Icon: Calendar, color: '#FF3B30' },
   megaphone: { Icon: Megaphone, color: '#FF9500' },
   chart: { Icon: BarChart3, color: '#5856D6' },
+  tasks: { Icon: ClipboardList, color: '#007AFF' },
   shift: { Icon: CalendarClock, color: '#FF9500' },
   leave: { Icon: Plane, color: '#30B0C7' },
   clock: { Icon: Clock, color: '#34C759' },
@@ -61,7 +62,7 @@ export default function NavLink({
   return (
     <Link href={href}
       className={`flex items-center gap-3 rounded-xl px-2.5 py-2 text-[15px] transition-colors ${
-        active ? 'bg-white shadow-sm font-semibold' : 'text-[#3a3a3c] hover:bg-black/5'}`}>
+        active ? 'bg-[#2C2C2E] text-white shadow-sm font-semibold' : 'text-[#D1D1D6] hover:bg-[#1C1C1E]/10'}`}>
       <span className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0"
         style={{ backgroundColor: color }}>
         <Icon size={16} strokeWidth={2.2} />

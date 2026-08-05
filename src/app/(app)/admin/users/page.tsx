@@ -45,7 +45,7 @@ export default async function UsersPage() {
         isSuper={isSuper}
       />
 
-      <div className="card divide-y divide-slate-100 mt-6">
+      <div className="card divide-y divide-white/[0.08] mt-6">
         {(users ?? []).map(u => (
           <div key={u.id} className="flex items-center gap-3 p-4">
             <div className="w-9 h-9 rounded-full bg-ios-blue/10 text-ios-blue flex items-center justify-center text-sm font-bold shrink-0">

@@ -61,7 +61,7 @@ export default async function AnnouncementsPage() {
           <div className="card p-10 text-center text-sm text-[#8E8E93]">Henüz duyuru yok.</div>
         )}
         {(anns ?? []).map(a => (
-          <article key={a.id} className={`card p-5 ${a.is_pinned ? 'border-brand-200 bg-brand-50/40' : ''}`}>
+          <article key={a.id} className={`card p-5 ${a.is_pinned ? 'border-brand-500/30 bg-brand-500/10' : ''}`}>
             <div className="flex items-start justify-between gap-3">
               <h2 className="font-semibold flex items-center gap-2">
                 {a.is_pinned && <Pin size={15} className="text-brand-500" />}
@@ -71,7 +71,7 @@ export default async function AnnouncementsPage() {
                 <span className="badge bg-brand-100 text-brand-700 shrink-0">Yeni</span>
               )}
             </div>
-            <p className="text-sm text-slate-600 mt-2 whitespace-pre-wrap">{a.body}</p>
+            <p className="text-sm text-[#B0B0B5] mt-2 whitespace-pre-wrap">{a.body}</p>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-xs text-[#AEAEB2]">
               <span>{a.profiles?.full_name ?? 'Yönetim'}</span>
               <span>·</span>

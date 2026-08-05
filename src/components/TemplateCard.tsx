@@ -42,7 +42,7 @@ export default function TemplateCard({
         <ul className="mt-3 space-y-1">
           {items.slice(0, 4).map(it => (
             <li key={it.id} className="text-sm text-[#8E8E93] flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" /> {it.title}
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1C1C1E]/25 shrink-0" /> {it.title}
             </li>
           ))}
           {items.length > 4 && <li className="text-xs text-[#AEAEB2]">+{items.length - 4} madde daha</li>}
@@ -57,9 +57,9 @@ export default function TemplateCard({
             const r = await instantiateTemplate(fd);
             if (r?.error) setError(r.error);
           })}
-          className="mt-4 border-t border-slate-100 pt-4 space-y-3"
+          className="mt-4 border-t border-white/[0.08] pt-4 space-y-3"
         >
-          {error && <p className="text-sm text-rose-600">{error}</p>}
+          {error && <p className="text-sm text-rose-300">{error}</p>}
           <div className="grid sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Tarih &amp; saat</label>
@@ -67,7 +67,7 @@ export default function TemplateCard({
             </div>
             <div>
               <label className="label">Kime atansın</label>
-              <div className="max-h-32 overflow-y-auto rounded-xl border border-slate-200 p-2 space-y-1">
+              <div className="max-h-32 overflow-y-auto rounded-xl border border-white/10 p-2 space-y-1">
                 {people.map(p => (
                   <label key={p.id} className="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="checkbox" name="assignees" value={p.id} className="rounded accent-[#ff5a1f]" />

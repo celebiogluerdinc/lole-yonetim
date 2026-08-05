@@ -16,7 +16,7 @@ export default function NotesPanel({ notes }: { notes: NoteT[] }) {
   return (
     <section>
       <h2 className="section-title">Notlarım</h2>
-      <div className="card divide-y divide-black/[0.06] overflow-hidden">
+      <div className="card divide-y divide-white/[0.08] overflow-hidden">
         {notes.map(n => (
           <div key={n.id} className="flex items-start gap-3 px-4 py-2.5 group">
             <div className="flex-1 min-w-0">

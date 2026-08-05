@@ -27,12 +27,12 @@ export default function NewCompanyForm() {
       </div>
       <div>
         <label className="label">Marka rengi</label>
-        <input name="accent_color" type="color" defaultValue="#ff5a1f" className="h-11 w-full sm:w-20 rounded-xl border border-slate-300 cursor-pointer" />
+        <input name="accent_color" type="color" defaultValue="#ff5a1f" className="h-11 w-full sm:w-20 rounded-xl border border-white/15 cursor-pointer" />
       </div>
       <button className="btn-primary" disabled={pending}>
         {pending ? 'Ekleniyor…' : '+ Şirket Ekle'}
       </button>
-      {error && <p className="text-sm text-rose-600">{error}</p>}
+      {error && <p className="text-sm text-rose-300">{error}</p>}
     </form>
   );
 }
