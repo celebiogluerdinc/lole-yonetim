@@ -14,56 +14,123 @@ async function notify(supabase: any, companyId: string, userIds: string[], title
 }
 
 // ==================== VARDİYA ====================
+const WD_OFFSET: Record<string, number> = { MO: 0, TU: 1, WE: 2, TH: 3, FR: 4, SA: 5, SU: 6 };
+
+function mondayOf(d: Date) {
+  const x = new Date(d);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+/**
+ * Add shifts: one or MANY people at once, one-off OR weekly recurring
+ * (selected weekdays × N weeks → a series sharing series_id).
+ */
 export async function addShift(formData: FormData) {
   const schema = z.object({
-    user_id: z.string().uuid(),
+    user_ids: z.array(z.string().uuid()).min(1),
     department_id: z.string().uuid(),
     date: z.string().min(8),
     start: z.string().min(4),
     end: z.string().min(4),
-    note: z.string().max(200).optional().default('')
+    note: z.string().max(200).optional().default(''),
+    repeat: z.enum(['none', 'weekly']),
+    weekdays: z.array(z.string()).default([]),
+    weeks: z.coerce.number().min(1).max(12).default(4)
   });
   const parsed = schema.safeParse({
-    user_id: String(formData.get('user_id') ?? ''),
+    user_ids: formData.getAll('user_ids').map(String),
     department_id: String(formData.get('department_id') ?? ''),
     date: String(formData.get('date') ?? ''),
     start: String(formData.get('start') ?? ''),
     end: String(formData.get('end') ?? ''),
-    note: String(formData.get('note') ?? '')
+    note: String(formData.get('note') ?? ''),
+    repeat: String(formData.get('repeat') ?? 'none'),
+    weekdays: formData.getAll('weekdays').map(String),
+    weeks: formData.get('weeks') || 4
   });
-  if (!parsed.success) return { error: 'Kişi, tarih ve saatler zorunludur.' };
+  if (!parsed.success) return { error: 'En az bir kişi, tarih ve saatler zorunludur.' };
   const i = parsed.data;
+  if (i.repeat === 'weekly' && i.weekdays.length === 0) {
+    return { error: 'Haftalık tekrar için en az bir gün seçin.' };
+  }
 
   const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
   const allowed = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.includes(i.department_id);
   if (!allowed) return { error: 'Bu departmanda vardiya planlamaya yetkiniz yok.' };
 
-  const starts = new Date(`${i.date}T${i.start}`);
-  let ends = new Date(`${i.date}T${i.end}`);
-  if (ends <= starts) ends = new Date(ends.getTime() + 24 * 3600 * 1000); // gece vardiyası
+  // occurrence dates
+  const baseDates: Date[] = [];
+  const anchor = new Date(`${i.date}T00:00:00`);
+  if (i.repeat === 'none') {
+    baseDates.push(anchor);
+  } else {
+    const week0 = mondayOf(anchor);
+    for (let w = 0; w < i.weeks; w++) {
+      for (const wd of i.weekdays) {
+        const off = WD_OFFSET[wd];
+        if (off === undefined) continue;
+        const d = new Date(week0.getTime() + (w * 7 + off) * 86400000);
+        if (d >= mondayOf(anchor) && (w > 0 || d >= anchor || true)) baseDates.push(d);
+      }
+    }
+    baseDates.sort((a, b) => a.getTime() - b.getTime());
+  }
 
-  const { error } = await supabase.from('shifts').insert({
-    company_id: companyId,
-    department_id: i.department_id,
-    user_id: i.user_id,
-    starts_at: starts.toISOString(),
-    ends_at: ends.toISOString(),
-    note: i.note || null,
-    created_by: profile.id
-  });
+  const seriesId = (i.repeat === 'weekly' || i.user_ids.length > 1)
+    ? crypto.randomUUID() : null;
+
+  const rows: any[] = [];
+  for (const d of baseDates) {
+    const dateStr = d.toISOString().slice(0, 10);
+    const starts = new Date(`${dateStr}T${i.start}`);
+    let ends = new Date(`${dateStr}T${i.end}`);
+    if (ends <= starts) ends = new Date(ends.getTime() + 24 * 3600 * 1000); // gece vardiyası
+    for (const uid of i.user_ids) {
+      rows.push({
+        company_id: companyId,
+        department_id: i.department_id,
+        user_id: uid,
+        starts_at: starts.toISOString(),
+        ends_at: ends.toISOString(),
+        note: i.note || null,
+        created_by: profile.id,
+        series_id: seriesId
+      });
+    }
+  }
+  if (rows.length === 0) return { error: 'Oluşturulacak vardiya bulunamadı.' };
+  if (rows.length > 400) return { error: 'Tek seferde en fazla 400 vardiya oluşturulabilir.' };
+
+  const { error } = await supabase.from('shifts').insert(rows);
   if (error) return { error: error.message };
 
-  const label = starts.toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-  await notify(supabase, companyId, [i.user_id], '🗓 Yeni vardiya atandı', `${label} başlangıçlı vardiyanız planlandı.`, '/shifts');
+  const first = baseDates[0].toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul', day: 'numeric', month: 'long' });
+  const body = i.repeat === 'weekly'
+    ? `${first} itibarıyla haftalık vardiya programınız güncellendi (${baseDates.length} gün).`
+    : `${first} · ${i.start}–${i.end} vardiyası planlandı.`;
+  await notify(supabase, companyId, i.user_ids, '🗓 Vardiya planlandı', body, '/shifts');
 
   revalidatePath('/shifts');
-  return { ok: true };
+  return { ok: true, count: rows.length };
 }
 
 export async function deleteShift(id: string) {
   const { supabase } = await getCtx();
-  await supabase.from('shifts').delete().eq('id', id); // RLS korur
+  const { error } = await supabase.from('shifts').delete().eq('id', id); // RLS korur
+  if (error) return { error: error.message };
+  revalidatePath('/shifts');
+  return { ok: true };
+}
+
+/** Deletes every remaining shift of a recurring series (RLS scoped). */
+export async function deleteShiftSeries(seriesId: string) {
+  if (!seriesId) return { error: 'Seri bulunamadı.' };
+  const { supabase } = await getCtx();
+  const { error } = await supabase.from('shifts').delete().eq('series_id', seriesId);
+  if (error) return { error: error.message };
   revalidatePath('/shifts');
   return { ok: true };
 }
