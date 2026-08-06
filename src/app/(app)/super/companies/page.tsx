@@ -1,4 +1,3 @@
-import { redirect } from 'next/navigation';
 import { getCtx } from '@/lib/auth';
 import NewCompanyForm from '@/components/NewCompanyForm';
 import CompanySwitch from '@/components/CompanySwitch';
@@ -7,14 +6,17 @@ import { cookies } from 'next/headers';
 export const dynamic = 'force-dynamic';
 
 export default async function CompaniesPage() {
-  const { supabase, profile } = await getCtx();
-  if (profile.role !== 'super_admin') redirect('/home');
+  const { supabase, profile, companyId } = await getCtx();
+  const isSuper = profile.role === 'super_admin';
 
-  const active = cookies().get('active_company')?.value ?? null;
+  const active = isSuper
+    ? (cookies().get('active_company')?.value ?? null)
+    : companyId;
+
   const { data: companies } = await supabase
     .from('companies').select('*').order('created_at');
 
-  // quick stats
+  // quick stats (RLS: normal kullanıcılar yalnızca kendi şirketinin sayısını görür)
   const { data: profileCounts } = await supabase
     .from('profiles').select('company_id');
   const counts: Record<string, number> = {};
@@ -26,11 +28,12 @@ export default async function CompaniesPage() {
     <main className="max-w-3xl mx-auto p-4 md:p-8">
       <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-1">Şirketler</h1>
       <p className="text-sm text-[#8E8E93] mb-6">
-        Bir şirkete girerek uygulamayı orada tam yetkiyle kullanabilirsiniz.
-        Yeni şirket eklediğinizde Operasyon, Satış, Üretim ve Yönetim departmanları hazır gelir.
+        {isSuper
+          ? 'Bir şirkete girerek uygulamayı orada tam yetkiyle kullanabilirsiniz. Yeni şirket eklediğinizde Operasyon, Satış, Üretim ve Yönetim departmanları hazır gelir.'
+          : 'Gruba bağlı şirketler aşağıda listelenir. Hesabınız işaretli şirkete bağlıdır; şirketler arasında geçiş yalnızca Süper Admin hesaplarında mümkündür.'}
       </p>
 
-      <NewCompanyForm />
+      {isSuper && <NewCompanyForm />}
 
       <div className="grid sm:grid-cols-2 gap-4 mt-6">
         {(companies ?? []).map(c => (
@@ -44,15 +47,30 @@ export default async function CompaniesPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="font-semibold truncate">{c.name}</p>
-                <p className="text-xs text-[#AEAEB2]">{counts[c.id] ?? 0} kullanıcı</p>
+                <p className="text-xs text-[#AEAEB2]">
+                  {counts[c.id] ? `${counts[c.id]} kullanıcı` : ' '}
+                </p>
               </div>
             </div>
             <div className="mt-4">
-              <CompanySwitch companyId={c.id} isActive={active === c.id} />
+              {isSuper ? (
+                <CompanySwitch companyId={c.id} isActive={active === c.id} />
+              ) : active === c.id ? (
+                <span className="badge bg-emerald-500/20 text-emerald-300">✓ Şirketiniz</span>
+              ) : (
+                <span className="badge bg-white/10 text-[#8E8E93]">Grup şirketi</span>
+              )}
             </div>
           </div>
         ))}
       </div>
+
+      {!isSuper && (
+        <p className="text-xs text-[#AEAEB2] mt-5">
+          Birden fazla şirkette çalışmanız gerekiyorsa, Süper Admin sizi Kullanıcılar sayfasından
+          &quot;Süper Admin&quot; yetkisine yükseltebilir — o zaman buradan tüm şirketlere geçiş yapabilirsiniz.
+        </p>
+      )}
     </main>
   );
 }

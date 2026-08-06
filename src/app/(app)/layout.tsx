@@ -50,15 +50,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/admin/users', label: 'Kullanıcılar', icon: 'users', show: isAdminRole, badge: 0 },
     { href: '/admin/departments', label: 'Departmanlar', icon: 'building', show: isAdminRole, badge: 0 },
     { href: '/admin/settings', label: 'Yönetim Paneli', icon: 'settings', show: isAdminRole, badge: 0 },
-    { href: '/super/companies', label: 'Şirketler', icon: 'landmark', show: profile.role === 'super_admin', badge: 0 },
+    { href: '/super/companies', label: 'Şirketler', icon: 'landmark', show: true, badge: 0 },
     { href: '/profile', label: 'Profilim', icon: 'profile', show: true, badge: 0 }
   ] as const).filter(n => n.show) as unknown as { href: string; label: string; icon: IconName; show: boolean; badge: number }[];
 
   return (
     <div className="min-h-dvh flex">
       {/* Sidebar — desktop (macOS Reminders style) */}
-      <aside className="hidden md:flex w-60 flex-col border-r border-white/[0.08] bg-[#141416] p-4 sticky top-0 h-dvh">
-        <div className="flex items-center gap-2.5 px-2 mb-6">
+      <aside className="hidden md:flex w-60 flex-col border-r border-white/[0.08] bg-[#141416] p-4 sticky top-0 h-dvh overflow-y-auto overscroll-contain
+        [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.18)_transparent]">
+        <Link href="/super/companies" title="Şirketler sayfasını aç"
+          className="flex items-center gap-2.5 px-2 mb-6 rounded-xl py-1 -mx-1 hover:bg-white/[0.05] transition-colors">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-white flex items-center justify-center font-bold shadow-sm">
             {appName[0]?.toUpperCase() ?? 'L'}
           </div>
@@ -66,13 +68,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <p className="font-semibold text-sm leading-tight truncate">{companyName}</p>
             <p className="text-xs text-[#8E8E93]">{appName}</p>
           </div>
-        </div>
-        <nav className="flex-1 space-y-1">
+        </Link>
+        {/* menü uzunsa kenar çubuğunun tamamı kayar — fare tekerleği her yerde çalışır */}
+        <nav className="space-y-1 pb-3">
           {nav.map(n => (
             <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} />
           ))}
         </nav>
-        <div className="border-t border-white/[0.08] pt-3 mt-3">
+        <div className="border-t border-white/[0.08] pt-3 mt-auto">
           <Link href="/profile" className="flex items-center gap-2.5 px-3 pb-2 hover:opacity-80 transition-opacity">
             <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-xs font-bold shrink-0">
               {(profile.full_name || profile.email)[0]?.toUpperCase()}

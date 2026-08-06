@@ -56,7 +56,7 @@ export default async function UsersPage() {
 
       <div className="card divide-y divide-white/[0.08] mt-6 overflow-hidden">
         {rows.map(u => (
-          <UserManage key={u.id} user={u} departments={companyDepts as any} meId={profile.id} />
+          <UserManage key={u.id} user={u} departments={companyDepts as any} meId={profile.id} meIsSuper={isSuper} />
         ))}
       </div>
     </main>

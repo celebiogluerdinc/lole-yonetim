@@ -111,7 +111,7 @@ export async function updateUser(formData: FormData) {
   const schema = z.object({
     user_id: z.string().uuid(),
     full_name: z.string().min(2).max(120),
-    role: z.enum(['admin', 'manager', 'staff']),
+    role: z.enum(['super_admin', 'admin', 'manager', 'staff']),
     new_password: z.string().max(72).optional().default(''),
     departments: z.array(z.string().uuid()).default([]),
     manager_departments: z.array(z.string().uuid()).default([])
@@ -140,6 +140,10 @@ export async function updateUser(formData: FormData) {
   if (!target) return { error: 'Kullanıcı bulunamadı.' };
   if (profile.role !== 'super_admin' && target.company_id !== companyId) {
     return { error: 'Bu kullanıcı sizin şirketinizde değil.' };
+  }
+  // Süper Admin yetkisi yalnızca süper adminler tarafından verilebilir/alınabilir
+  if (profile.role !== 'super_admin' && (input.role === 'super_admin' || target.role === 'super_admin')) {
+    return { error: 'Süper Admin yetkisini yalnızca bir Süper Admin değiştirebilir.' };
   }
   // kendi rolünü düşürmesin
   const roleToSet = input.user_id === profile.id ? target.role : input.role;

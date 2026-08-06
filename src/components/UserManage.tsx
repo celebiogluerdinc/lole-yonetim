@@ -14,8 +14,8 @@ export interface ManagedUser {
 }
 
 export default function UserManage({
-  user, departments, meId
-}: { user: ManagedUser; departments: Dept[]; meId: string }) {
+  user, departments, meId, meIsSuper = false
+}: { user: ManagedUser; departments: Dept[]; meId: string; meIsSuper?: boolean }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -80,8 +80,16 @@ export default function UserManage({
                 <option value="staff">Personel</option>
                 <option value="manager">Müdür</option>
                 <option value="admin">Admin</option>
+                {(meIsSuper || user.role === 'super_admin') && (
+                  <option value="super_admin">Süper Admin (tüm şirketler)</option>
+                )}
               </select>
               {isSelf && <p className="text-[11px] text-[#8E8E93] mt-1">Kendi rolünüzü değiştiremezsiniz.</p>}
+              {meIsSuper && !isSelf && (
+                <p className="text-[11px] text-[#8E8E93] mt-1">
+                  Süper Admin: tüm şirketleri görür ve aralarında geçiş yapabilir.
+                </p>
+              )}
             </div>
           </div>
 
