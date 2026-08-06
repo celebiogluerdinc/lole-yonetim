@@ -40,6 +40,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/calendar', label: 'Takvim', icon: 'calendar', show: true, badge: 0 },
     { href: '/announcements', label: 'Duyurular', icon: 'megaphone', show: true, badge: 0 },
     { href: '/performance', label: 'Performans', icon: 'chart', show: true, badge: 0 },
+    { href: '/purchasing', label: 'Satın Alma', icon: 'cart', show: true, badge: 0 },
+    { href: '/payments', label: 'Ödeme Talepleri', icon: 'wallet', show: true, badge: 0 },
     { href: '/shifts', label: 'Vardiyalar', icon: 'shift', show: true, badge: 0 },
     { href: '/leave', label: 'İzinler', icon: 'leave', show: true, badge: 0 },
     { href: '/clock', label: 'Mesai', icon: 'clock', show: true, badge: 0 },
