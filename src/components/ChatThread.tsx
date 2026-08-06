@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronLeft, ArrowUp } from 'lucide-react';
-import { sendMessage, markRead } from '@/app/(app)/messages/actions';
+import { ChevronLeft, ArrowUp, ChevronDown, Pencil, Trash2, X } from 'lucide-react';
+import { sendMessage, editMessage, deleteMessage, markRead } from '@/app/(app)/messages/actions';
 import { TZ } from '@/lib/utils';
 
-interface Msg { id: string; sender_id: string; body: string; created_at: string; }
+interface Msg {
+  id: string; sender_id: string; body: string; created_at: string;
+  edited_at?: string | null; deleted_at?: string | null;
+}
 
 function dayLabel(iso: string) {
   const d = new Date(iso);
@@ -32,7 +35,11 @@ export default function ChatThread({
   const [pending, start] = useTransition();
   const [text, setText] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);          // hangi mesajın menüsü açık
+  const [editing, setEditing] = useState<Msg | null>(null);             // düzenlenen mesaj
+  const [hidden, setHidden] = useState<Set<string>>(new Set());         // iyimser silinen
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' });
@@ -53,10 +60,47 @@ export default function ChatThread({
     if (!body || pending) return;
     setText('');
     setSendError(null);
+    if (editing) {
+      const target = editing;
+      setEditing(null);
+      start(async () => {
+        const r = await editMessage(target.id, body);
+        if (r?.error) {
+          setText(body);
+          setEditing(target);
+          setSendError(r.error);
+        } else {
+          router.refresh();
+        }
+      });
+      return;
+    }
     start(async () => {
       const r = await sendMessage(conversationId, body);
       if (r?.error) {
         setText(body); // yazılan metni geri getir — kaybolmasın
+        setSendError(r.error);
+      } else {
+        router.refresh();
+      }
+    });
+  }
+
+  function startEdit(m: Msg) {
+    setMenuFor(null);
+    setEditing(m);
+    setText(m.body);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }
+
+  function onDelete(m: Msg) {
+    setMenuFor(null);
+    if (!window.confirm('Bu mesaj silinsin mi?')) return;
+    setHidden(h => new Set(h).add(m.id)); // iyimser: anında "silindi" göster
+    start(async () => {
+      const r = await deleteMessage(m.id);
+      if (r?.error) {
+        setHidden(h => { const n = new Set(h); n.delete(m.id); return n; });
         setSendError(r.error);
       } else {
         router.refresh();
@@ -101,21 +145,51 @@ export default function ChatThread({
               const mine = m.sender_id === meId;
               const prev = g.items[i - 1];
               const showName = isGroup && !mine && (!prev || prev.sender_id !== m.sender_id);
+              const isDeleted = !!m.deleted_at || hidden.has(m.id);
               return (
                 <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[78%] ${mine ? 'items-end' : 'items-start'} flex flex-col`}>
                     {showName && (
                       <p className="text-[12px] text-[#8E8E93] ml-3 mb-0.5">{names[m.sender_id] ?? ''}</p>
                     )}
-                    <div className={`px-3.5 py-2 text-[16px] leading-snug whitespace-pre-wrap break-words rounded-2xl ${
-                      mine
-                        ? 'bg-ios-blue text-white rounded-br-[6px]'
-                        : 'bg-[#2C2C2E] text-[#F2F2F7] rounded-bl-[6px]'
-                    }`}>
-                      {m.body}
-                    </div>
+                    {isDeleted ? (
+                      <div className={`px-3.5 py-2 text-[14px] italic rounded-2xl border border-white/[0.08] text-[#8E8E93] ${
+                        mine ? 'rounded-br-[6px]' : 'rounded-bl-[6px]'}`}>
+                        🚫 Bu mesaj silindi
+                      </div>
+                    ) : (
+                      <div className={`group relative px-3.5 py-2 text-[16px] leading-snug whitespace-pre-wrap break-words rounded-2xl ${
+                        mine
+                          ? 'bg-ios-blue text-white rounded-br-[6px]'
+                          : 'bg-[#2C2C2E] text-[#F2F2F7] rounded-bl-[6px]'
+                      }`}>
+                        {m.body}
+                        {mine && (
+                          <button
+                            aria-label="Mesaj seçenekleri"
+                            onClick={() => setMenuFor(v => v === m.id ? null : m.id)}
+                            className={`absolute -left-7 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-[#2C2C2E] text-[#8E8E93] items-center justify-center
+                              hover:text-white transition-colors flex md:opacity-0 md:group-hover:opacity-100 ${menuFor === m.id ? 'md:opacity-100' : ''}`}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {mine && menuFor === m.id && !isDeleted && (
+                      <div className="flex gap-1.5 mt-1">
+                        <button onClick={() => startEdit(m)}
+                          className="flex items-center gap-1 rounded-full bg-[#2C2C2E] px-2.5 py-1 text-[12px] font-medium text-[#D1D1D6] hover:bg-white/15">
+                          <Pencil size={11} /> Düzenle
+                        </button>
+                        <button onClick={() => onDelete(m)}
+                          className="flex items-center gap-1 rounded-full bg-rose-500/15 px-2.5 py-1 text-[12px] font-medium text-rose-300 hover:bg-rose-500/30">
+                          <Trash2 size={11} /> Sil
+                        </button>
+                      </div>
+                    )}
                     <p className={`text-[11px] text-[#AEAEB2] mt-0.5 ${mine ? 'mr-1' : 'ml-1'}`}>
-                      {hhmm(m.created_at)}
+                      {hhmm(m.created_at)}{m.edited_at && !isDeleted ? ' · düzenlendi' : ''}
                     </p>
                   </div>
                 </div>
@@ -132,14 +206,30 @@ export default function ChatThread({
           Mesaj gönderilemedi: {sendError}
         </p>
       )}
+      {editing && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-ios-blue/10 border-t border-ios-blue/25">
+          <Pencil size={13} className="text-ios-blue shrink-0" />
+          <p className="flex-1 text-[12px] text-ios-blue truncate">
+            Mesaj düzenleniyor: <span className="text-[#D1D1D6]">{editing.body.slice(0, 60)}</span>
+          </p>
+          <button
+            aria-label="Düzenlemeyi iptal et"
+            onClick={() => { setEditing(null); setText(''); }}
+            className="w-6 h-6 rounded-full bg-white/10 text-[#8E8E93] flex items-center justify-center shrink-0"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
       <form
         onSubmit={(e) => { e.preventDefault(); onSend(); }}
         className="flex items-center gap-2 px-3 py-2.5 bg-black/85 backdrop-blur border-t border-white/[0.08]"
       >
         <input
+          ref={inputRef}
           value={text}
           onChange={e => setText(e.target.value)}
-          placeholder="Mesaj"
+          placeholder={editing ? 'Mesajı düzenleyin…' : 'Mesaj'}
           className="flex-1 rounded-full bg-[#1C1C1E] border border-white/[0.10] px-4 py-2 text-[16px] outline-none focus:border-ios-blue/40"
         />
         <button

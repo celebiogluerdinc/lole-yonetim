@@ -2,13 +2,14 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Camera, Paperclip, Send, AlertTriangle, ThumbsUp, ThumbsDown, Ban, CheckCheck } from 'lucide-react';
+import { Check, Camera, Paperclip, Send, AlertTriangle, ThumbsUp, ThumbsDown, Ban, CheckCheck, LayoutTemplate } from 'lucide-react';
 import type { Task, ChecklistItem } from '@/lib/types';
 import { fmtDate } from '@/lib/utils';
 import {
   toggleChecklistItem, completeTask, blockTask, reviewTask,
   uploadAttachment, addTaskNote, managerSetTaskStatus
 } from '@/app/(app)/tasks/actions';
+import { saveTaskAsTemplate } from '@/app/(app)/manage/actions';
 
 interface Att { id: string; file_name: string; mime_type: string | null; url?: string; created_at: string; checklist_item_id: string | null; ai_verdict?: string | null; ai_note?: string | null; }
 interface NoteT { id: string; body: string; created_at: string; profiles?: { full_name: string } | null; }
@@ -22,6 +23,7 @@ export default function TaskDetailClient({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [tplOk, setTplOk] = useState<string | null>(null);
   const [blockOpen, setBlockOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -305,28 +307,52 @@ export default function TaskDetailClient({
         </p>
       )}
 
-      {/* Manager controls: finish / cancel any in-scope task */}
-      {canReview && !finished && !inReview && (
-        <div className="flex gap-2">
-          <button
-            disabled={pending}
-            onClick={() => run(() => managerSetTaskStatus(task.id, 'completed'))}
-            className="btn-outline flex-1 !text-emerald-300"
-          >
-            <CheckCheck size={15} /> Görevi Bitir (yönetici)
-          </button>
-          <button
-            disabled={pending}
-            onClick={() => {
-              if (window.confirm('Bu görev iptal edilsin mi?')) {
-                run(() => managerSetTaskStatus(task.id, 'cancelled'));
-              }
-            }}
-            className="btn-outline flex-1 !text-rose-300"
-          >
-            <Ban size={15} /> İptal Et
-          </button>
-        </div>
+      {/* Manager controls: finish / cancel / save as template */}
+      {canReview && (
+        <>
+          {tplOk && (
+            <p className="text-[13px] text-emerald-300 bg-emerald-500/10 rounded-xl px-3 py-2">
+              ✔ &quot;{tplOk}&quot; şablonlara eklendi — Şablonlar sayfasından tekrar tekrar atayabilirsiniz.
+            </p>
+          )}
+          <div className="flex flex-col sm:flex-row gap-2">
+            {!finished && !inReview && (
+              <>
+                <button
+                  disabled={pending}
+                  onClick={() => run(() => managerSetTaskStatus(task.id, 'completed'))}
+                  className="btn-outline flex-1 !text-emerald-300"
+                >
+                  <CheckCheck size={15} /> Görevi Bitir (yönetici)
+                </button>
+                <button
+                  disabled={pending}
+                  onClick={() => {
+                    if (window.confirm('Bu görev iptal edilsin mi?')) {
+                      run(() => managerSetTaskStatus(task.id, 'cancelled'));
+                    }
+                  }}
+                  className="btn-outline flex-1 !text-rose-300"
+                >
+                  <Ban size={15} /> İptal Et
+                </button>
+              </>
+            )}
+            <button
+              disabled={pending}
+              onClick={() => start(async () => {
+                setError(null); setTplOk(null);
+                const r = await saveTaskAsTemplate(task.id);
+                if (r?.error) setError(r.error);
+                else setTplOk((r as any)?.name ?? task.title);
+              })}
+              className="btn-outline flex-1 !text-[#9F9CFF]"
+              title="Bu görevi (checklist maddeleriyle birlikte) yeniden kullanılabilir bir şablona dönüştürür"
+            >
+              <LayoutTemplate size={15} /> Şablonlara Ekle
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

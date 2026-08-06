@@ -115,6 +115,43 @@ export async function sendMessage(conversationId: string, body: string) {
   return { ok: true };
 }
 
+/** Edit YOUR OWN message. The bubble gets a "düzenlendi" marker. */
+export async function editMessage(messageId: string, body: string) {
+  if (!z.string().uuid().safeParse(messageId).success) return { error: 'Geçersiz mesaj.' };
+  const text = z.string().min(1).max(4000).safeParse(body.trim());
+  if (!text.success) return { error: 'Mesaj boş olamaz.' };
+
+  const { supabase, profile } = await getCtx();
+  const { data, error } = await supabase.from('messages')
+    .update({ body: text.data, edited_at: new Date().toISOString() })
+    .eq('id', messageId)
+    .eq('sender_id', profile.id)      // yalnızca kendi mesajı
+    .is('deleted_at', null)
+    .select('conversation_id');
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Yalnızca kendi mesajınızı düzenleyebilirsiniz.' };
+
+  revalidatePath(`/messages/${data[0].conversation_id}`);
+  return { ok: true };
+}
+
+/** Delete YOUR OWN message (soft delete — bubble shows "Bu mesaj silindi"). */
+export async function deleteMessage(messageId: string) {
+  if (!z.string().uuid().safeParse(messageId).success) return { error: 'Geçersiz mesaj.' };
+  const { supabase, profile } = await getCtx();
+  const { data, error } = await supabase.from('messages')
+    .update({ body: '', deleted_at: new Date().toISOString() })
+    .eq('id', messageId)
+    .eq('sender_id', profile.id)      // yalnızca kendi mesajı
+    .is('deleted_at', null)
+    .select('conversation_id');
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Yalnızca kendi mesajınızı silebilirsiniz.' };
+
+  revalidatePath(`/messages/${data[0].conversation_id}`);
+  return { ok: true };
+}
+
 /** Mark a conversation read for the current user. */
 export async function markRead(conversationId: string) {
   const { supabase, profile } = await getCtx();

@@ -391,6 +391,67 @@ export async function updateTemplate(formData: FormData) {
   return { ok: true };
 }
 
+/**
+ * Convert an existing (assigned) task into a reusable template:
+ * title, description, priority, photo/approval flags and checklist items are copied.
+ */
+export async function saveTaskAsTemplate(taskId: string) {
+  if (!z.string().uuid().safeParse(taskId).success) return { error: 'Geçersiz görev.' };
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).maybeSingle();
+  if (!task || task.company_id !== companyId) return { error: 'Görev bulunamadı.' };
+
+  const canDo = ['super_admin', 'admin'].includes(profile.role) ||
+    (task.department_id ? managedDepartmentIds.includes(task.department_id) : false);
+  if (!canDo) return { error: 'Bu görevi şablona dönüştürme yetkiniz yok.' };
+
+  // aynı adla şablon zaten varsa kopya üretme
+  const { data: existing } = await supabase.from('templates')
+    .select('id').eq('company_id', companyId).eq('name', task.title).limit(1);
+  if (existing?.length) {
+    return { error: `"${task.title}" adında bir şablon zaten var. Önce Şablonlar sayfasından onu düzenleyin veya silin.` };
+  }
+
+  const { data: items } = await supabase.from('checklist_items')
+    .select('title, position, requires_photo')
+    .eq('task_id', taskId).order('position');
+
+  const { data: tpl, error } = await supabase.from('templates').insert({
+    company_id: companyId,
+    department_id: task.department_id,
+    name: task.title,
+    description: task.description,
+    type: task.type,
+    default_priority: task.priority,
+    requires_photo: task.requires_photo,
+    requires_approval: task.requires_approval,
+    created_by: profile.id
+  }).select().single();
+  if (error) return { error: error.message };
+
+  if (items?.length) {
+    const { error: iErr } = await supabase.from('template_items').insert(
+      items.map((it: any, idx: number) => ({
+        template_id: tpl.id,
+        title: it.title,
+        position: it.position ?? idx,
+        requires_photo: it.requires_photo ?? false
+      }))
+    );
+    if (iErr) return { error: `Şablon oluştu ama maddeler kopyalanamadı: ${iErr.message}` };
+  }
+
+  await supabase.from('activity_log').insert({
+    company_id: companyId, actor_id: profile.id, entity_type: 'template',
+    entity_id: tpl.id, action: 'created_from_task', meta: { task_id: taskId, name: task.title }
+  });
+
+  revalidatePath('/manage/templates');
+  return { ok: true, name: task.title };
+}
+
 /** Delete a template (its items cascade). Admin, or manager of its department. */
 export async function deleteTemplate(templateId: string) {
   if (!z.string().uuid().safeParse(templateId).success) return { error: 'Geçersiz şablon.' };

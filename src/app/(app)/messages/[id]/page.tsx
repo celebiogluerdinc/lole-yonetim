@@ -18,9 +18,8 @@ export default async function ThreadPage({ params }: { params: { id: string } })
       .eq('conversation_id', conv.id),
     supabase
       .from('messages')
-      .select('id, sender_id, body, created_at, deleted_at')
+      .select('id, sender_id, body, created_at, edited_at, deleted_at')
       .eq('conversation_id', conv.id)
-      .is('deleted_at', null)
       .order('created_at', { ascending: true })
       .limit(300)
   ]);
