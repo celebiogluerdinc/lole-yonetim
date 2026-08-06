@@ -348,6 +348,149 @@ export async function uploadAttachment(formData: FormData) {
   return { ok: true };
 }
 
+/** <input type="datetime-local"> has no timezone — interpret it as Istanbul (+03:00). */
+function istDate(s: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) && !/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(s)) {
+    return new Date(`${s.slice(0, 16)}:00+03:00`);
+  }
+  return new Date(s);
+}
+
+/** Manager permission for a task: admin/super, or manages the task's department. */
+async function canManageTask(profile: any, managedDepartmentIds: string[], task: any): Promise<boolean> {
+  if (profile.role === 'super_admin' || profile.role === 'admin') return true;
+  return !!(task.department_id && managedDepartmentIds.includes(task.department_id));
+}
+
+/**
+ * Manager edits an existing task: title, description, due date/time, priority,
+ * photo/approval requirements, assignees (replaced) and NEW checklist items (appended).
+ */
+export async function updateTask(formData: FormData) {
+  const schema = z.object({
+    task_id: z.string().uuid(),
+    title: z.string().min(2).max(200),
+    description: z.string().max(2000).optional().default(''),
+    due_at: z.string().min(1),
+    priority: z.enum(['low', 'normal', 'high', 'urgent']),
+    requires_photo: z.boolean(),
+    requires_approval: z.boolean(),
+    assignees: z.array(z.string().uuid()).min(1),
+    new_items: z.array(z.string().min(1).max(300)).default([])
+  });
+  const parsed = schema.safeParse({
+    task_id: String(formData.get('task_id') ?? ''),
+    title: String(formData.get('title') ?? '').trim(),
+    description: String(formData.get('description') ?? '').trim(),
+    due_at: String(formData.get('due_at') ?? ''),
+    priority: String(formData.get('priority') ?? 'normal'),
+    requires_photo: formData.get('requires_photo') === 'on',
+    requires_approval: formData.get('requires_approval') === 'on',
+    assignees: formData.getAll('assignees').map(String),
+    new_items: formData.getAll('new_items').map(String).map(s => s.trim()).filter(Boolean)
+  });
+  if (!parsed.success) {
+    return { error: 'Başlık, bitiş tarihi ve en az bir atanan kişi zorunludur.' };
+  }
+  const i = parsed.data;
+
+  const { supabase, profile, managedDepartmentIds } = await getCtx();
+  const { data: task } = await supabase.from('tasks').select('*').eq('id', i.task_id).maybeSingle();
+  if (!task) return { error: 'Görev bulunamadı veya erişiminiz yok.' };
+  if (!(await canManageTask(profile, managedDepartmentIds, task))) {
+    return { error: 'Bu görevi düzenleme yetkiniz yok.' };
+  }
+  if (['completed', 'cancelled'].includes(task.status)) {
+    return { error: 'Tamamlanmış veya iptal edilmiş görev düzenlenemez.' };
+  }
+
+  const due = istDate(i.due_at);
+  if (isNaN(due.getTime())) return { error: 'Geçersiz tarih/saat.' };
+
+  // güvenlik: atananlar görevin şirketinde olmalı
+  const { data: validAssignees } = await supabase
+    .from('profiles').select('id').eq('company_id', task.company_id).in('id', i.assignees);
+  if ((validAssignees ?? []).length !== i.assignees.length) {
+    return { error: 'Seçilen kişilerden bazıları bu şirkette bulunamadı.' };
+  }
+
+  const { error } = await supabase.from('tasks').update({
+    title: i.title,
+    description: i.description || null,
+    due_at: due.toISOString(),
+    priority: i.priority,
+    requires_photo: i.requires_photo,
+    requires_approval: i.requires_approval
+  }).eq('id', i.task_id);
+  if (error) return { error: error.message };
+
+  // atananları güncelle (fark bazlı: yeni eklenenlere bildirim gider)
+  const { data: currentA } = await supabase
+    .from('task_assignees').select('user_id').eq('task_id', i.task_id);
+  const before = new Set((currentA ?? []).map((a: any) => a.user_id));
+  const after = new Set(i.assignees);
+  const added = i.assignees.filter(u => !before.has(u));
+  const removed = Array.from(before).filter((u: any) => !after.has(u)) as string[];
+
+  const ops: any[] = [];
+  if (removed.length) {
+    ops.push(supabase.from('task_assignees').delete().eq('task_id', i.task_id).in('user_id', removed));
+  }
+  if (added.length) {
+    ops.push(supabase.from('task_assignees').insert(added.map(user_id => ({ task_id: i.task_id, user_id }))));
+  }
+  if (i.new_items.length) {
+    const { data: lastItem } = await supabase.from('checklist_items')
+      .select('position').eq('task_id', i.task_id)
+      .order('position', { ascending: false }).limit(1).maybeSingle();
+    const base = (lastItem?.position ?? -1) + 1;
+    ops.push(supabase.from('checklist_items').insert(
+      i.new_items.map((title, idx) => ({ task_id: i.task_id, title, position: base + idx }))
+    ));
+  }
+  ops.push(log(supabase, task.company_id, profile.id, 'task', i.task_id, 'updated',
+    { title: i.title, added: added.length, removed: removed.length, new_items: i.new_items.length }));
+  const results = await Promise.all(ops);
+  const failed = results.find((r: any) => r?.error);
+  if (failed?.error) return { error: failed.error.message };
+
+  if (added.length) {
+    await supabase.from('notifications').insert(added.map(user_id => ({
+      company_id: task.company_id, user_id, type: 'task_assigned',
+      payload: { task_id: i.task_id, title: i.title, due_at: due.toISOString() }
+    })));
+    pushToUsers(added, {
+      title: '📋 Size yeni görev atandı', body: i.title, url: `/tasks/${i.task_id}`
+    }).catch(() => {});
+  }
+
+  revalidatePath(`/tasks/${i.task_id}`);
+  revalidatePath('/manage/tasks');
+  revalidatePath('/home');
+  return { ok: true };
+}
+
+/** Manager removes a checklist item from a task. */
+export async function deleteChecklistItem(itemId: string) {
+  if (!z.string().uuid().safeParse(itemId).success) return { error: 'Geçersiz madde.' };
+  const { supabase, profile, managedDepartmentIds } = await getCtx();
+  const { data: item } = await supabase.from('checklist_items')
+    .select('id, task_id, tasks:task_id(id, company_id, department_id, status)')
+    .eq('id', itemId).maybeSingle();
+  if (!item || !item.tasks) return { error: 'Madde bulunamadı.' };
+  const task: any = item.tasks;
+  if (!(await canManageTask(profile, managedDepartmentIds, task))) {
+    return { error: 'Bu görevi düzenleme yetkiniz yok.' };
+  }
+  if (['completed', 'cancelled'].includes(task.status)) {
+    return { error: 'Tamamlanmış görev düzenlenemez.' };
+  }
+  const { error } = await supabase.from('checklist_items').delete().eq('id', itemId);
+  if (error) return { error: error.message };
+  revalidatePath(`/tasks/${task.id}`);
+  return { ok: true };
+}
+
 export async function addTaskNote(formData: FormData) {
   const { supabase, profile } = await getCtx();
   const taskId = String(formData.get('task_id') ?? '');

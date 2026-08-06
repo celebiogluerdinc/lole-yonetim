@@ -1,7 +1,8 @@
 import { notFound } from 'next/navigation';
 import { getCtx } from '@/lib/auth';
-import { fmtDate, STATUS_LABEL, STATUS_COLOR, PRIORITY_LABEL, PRIORITY_COLOR } from '@/lib/utils';
+import { fmtDate, TZ, STATUS_LABEL, STATUS_COLOR, PRIORITY_LABEL, PRIORITY_COLOR } from '@/lib/utils';
 import TaskDetailClient from '@/components/TaskDetailClient';
+import TaskEdit from '@/components/TaskEdit';
 import { Camera, Repeat, ShieldCheck } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -38,6 +39,19 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
     profile.role === 'super_admin' ||
     profile.role === 'admin' ||
     (task.department_id && managedDepartmentIds.includes(task.department_id));
+
+  // editor data (managers only): people list + due date in Istanbul local format
+  const canEdit = !!canReview && !['completed', 'cancelled'].includes(task.status);
+  let people: any[] = [];
+  if (canEdit) {
+    const { data } = await supabase.from('profiles')
+      .select('id, full_name').eq('company_id', task.company_id)
+      .eq('is_active', true).order('full_name');
+    people = data ?? [];
+  }
+  const dueLocal = task.due_at
+    ? new Date(task.due_at).toLocaleString('sv-SE', { timeZone: TZ }).slice(0, 16).replace(' ', 'T')
+    : '';
 
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8 space-y-5">
@@ -86,6 +100,16 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
           </div>
         )}
       </header>
+
+      {canEdit && (
+        <TaskEdit
+          task={task}
+          dueLocal={dueLocal}
+          items={(items ?? []) as any}
+          people={people}
+          assigneeIds={(assignees ?? []).map((a: any) => a.user_id)}
+        />
+      )}
 
       <TaskDetailClient
         task={task}

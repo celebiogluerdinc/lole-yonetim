@@ -327,6 +327,70 @@ export async function instantiateTemplate(formData: FormData): Promise<{ error?:
   redirect(`/tasks/${task.id}`);
 }
 
+/**
+ * Edit an existing template: name, description, priority, requirements and
+ * the full item list (replaced with what's submitted).
+ */
+export async function updateTemplate(formData: FormData) {
+  const schema = z.object({
+    template_id: z.string().uuid(),
+    name: z.string().min(2).max(200),
+    description: z.string().max(1000).optional().default(''),
+    default_priority: z.enum(['low', 'normal', 'high', 'urgent']),
+    requires_photo: z.boolean(),
+    requires_approval: z.boolean(),
+    items: z.array(z.string().min(1).max(300)).default([])
+  });
+  const parsed = schema.safeParse({
+    template_id: String(formData.get('template_id') ?? ''),
+    name: String(formData.get('name') ?? '').trim(),
+    description: String(formData.get('description') ?? '').trim(),
+    default_priority: String(formData.get('default_priority') ?? 'normal'),
+    requires_photo: formData.get('requires_photo') === 'on',
+    requires_approval: formData.get('requires_approval') === 'on',
+    items: formData.getAll('items').map(String).map(s => s.trim()).filter(Boolean)
+  });
+  if (!parsed.success) return { error: 'Şablon adı en az 2 karakter olmalı.' };
+  const i = parsed.data;
+
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const { data: tpl } = await supabase.from('templates')
+    .select('id, company_id, department_id, type').eq('id', i.template_id).maybeSingle();
+  if (!tpl || tpl.company_id !== companyId) return { error: 'Şablon bulunamadı.' };
+
+  const canEdit = ['super_admin', 'admin'].includes(profile.role) ||
+    (tpl.department_id ? managedDepartmentIds.includes(tpl.department_id) : false);
+  if (!canEdit) return { error: 'Bu şablonu düzenleme yetkiniz yok.' };
+  if (tpl.type === 'checklist' && i.items.length === 0) {
+    return { error: 'Checklist şablonu için en az bir madde gerekli.' };
+  }
+
+  const { error } = await supabase.from('templates').update({
+    name: i.name,
+    description: i.description || null,
+    default_priority: i.default_priority,
+    requires_photo: i.requires_photo,
+    requires_approval: i.requires_approval
+  }).eq('id', i.template_id);
+  if (error) return { error: error.message };
+
+  // maddeleri komple yenile (yalnızca şablonu etkiler; oluşturulmuş görevler etkilenmez)
+  const { error: delErr } = await supabase.from('template_items')
+    .delete().eq('template_id', i.template_id);
+  if (delErr) return { error: delErr.message };
+  if (i.items.length) {
+    const { error: insErr } = await supabase.from('template_items').insert(
+      i.items.map((title, idx) => ({ template_id: i.template_id, title, position: idx }))
+    );
+    if (insErr) return { error: insErr.message };
+  }
+
+  revalidatePath('/manage/templates');
+  return { ok: true };
+}
+
 /** Delete a template (its items cascade). Admin, or manager of its department. */
 export async function deleteTemplate(templateId: string) {
   if (!z.string().uuid().safeParse(templateId).success) return { error: 'Geçersiz şablon.' };
