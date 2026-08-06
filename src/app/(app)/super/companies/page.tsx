@@ -1,17 +1,15 @@
 import { getCtx } from '@/lib/auth';
 import NewCompanyForm from '@/components/NewCompanyForm';
 import CompanySwitch from '@/components/CompanySwitch';
-import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
 
 export default async function CompaniesPage() {
   const { supabase, profile, companyId } = await getCtx();
   const isSuper = profile.role === 'super_admin';
+  const canSwitch = ['super_admin', 'admin'].includes(profile.role);
 
-  const active = isSuper
-    ? (cookies().get('active_company')?.value ?? null)
-    : companyId;
+  const active = companyId;
 
   const { data: companies } = await supabase
     .from('companies').select('*').order('created_at');
@@ -28,9 +26,9 @@ export default async function CompaniesPage() {
     <main className="max-w-3xl mx-auto p-4 md:p-8">
       <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-1">Şirketler</h1>
       <p className="text-sm text-[#8E8E93] mb-6">
-        {isSuper
-          ? 'Bir şirkete girerek uygulamayı orada tam yetkiyle kullanabilirsiniz. Yeni şirket eklediğinizde Operasyon, Satış, Üretim ve Yönetim departmanları hazır gelir.'
-          : 'Gruba bağlı şirketler aşağıda listelenir. Hesabınız işaretli şirkete bağlıdır; şirketler arasında geçiş yalnızca Süper Admin hesaplarında mümkündür.'}
+        {canSwitch
+          ? 'Bir şirkete girerek uygulamayı orada tam yetkiyle kullanabilirsiniz. Admin ve Süper Admin hesapları tüm şirketlere erişir.'
+          : 'Gruba bağlı şirketler aşağıda listelenir. Hesabınız işaretli şirkete bağlıdır.'}
       </p>
 
       {isSuper && <NewCompanyForm />}
@@ -53,7 +51,7 @@ export default async function CompaniesPage() {
               </div>
             </div>
             <div className="mt-4">
-              {isSuper ? (
+              {canSwitch ? (
                 <CompanySwitch companyId={c.id} isActive={active === c.id} />
               ) : active === c.id ? (
                 <span className="badge bg-emerald-500/20 text-emerald-300">✓ Şirketiniz</span>
@@ -65,10 +63,9 @@ export default async function CompaniesPage() {
         ))}
       </div>
 
-      {!isSuper && (
+      {!canSwitch && (
         <p className="text-xs text-[#AEAEB2] mt-5">
-          Birden fazla şirkette çalışmanız gerekiyorsa, Süper Admin sizi Kullanıcılar sayfasından
-          &quot;Süper Admin&quot; yetkisine yükseltebilir — o zaman buradan tüm şirketlere geçiş yapabilirsiniz.
+          Şirketler arasında geçiş Admin ve Süper Admin hesaplarında mümkündür.
         </p>
       )}
     </main>

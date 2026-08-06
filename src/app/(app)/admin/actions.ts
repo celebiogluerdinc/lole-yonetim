@@ -57,8 +57,8 @@ export async function createUser(formData: FormData) {
   const authErr = requireAdmin(profile.role);
   if (authErr) return { error: authErr };
 
-  // super admin may create into ANY company; company admin only into their own
-  const companyId = profile.role === 'super_admin'
+  // admin ve süper admin İSTEDİĞİ şirkete kullanıcı ekleyebilir
+  const companyId = ['super_admin', 'admin'].includes(profile.role)
     ? (input.company_id ?? actingCompany)
     : actingCompany;
   if (!companyId) return { error: 'Önce bir şirket seçin.' };

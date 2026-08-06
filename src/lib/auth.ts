@@ -46,6 +46,11 @@ export const getCtx = cache(async (): Promise<Ctx> => {
   if (profile.role === 'super_admin') {
     const c = cookies().get('active_company')?.value;
     companyId = c || null;
+  } else if (profile.role === 'admin') {
+    // adminler tam yetkili: şirketler arasında geçiş yapabilir,
+    // seçim yoksa kendi şirketlerinde çalışırlar
+    const c = cookies().get('active_company')?.value;
+    companyId = c || profile.company_id;
   }
 
   const managedDepartmentIds = (managed ?? []).map((m: any) => m.department_id);

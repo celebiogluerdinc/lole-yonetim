@@ -11,13 +11,15 @@ export default async function UsersPage() {
   if (!companyId) redirect(profile.role === 'super_admin' ? '/super/companies' : '/home');
 
   const isSuper = profile.role === 'super_admin';
+  // adminler de tüm şirketlere kullanıcı ekleyip yönetebilir
+  const crossCompany = ['super_admin', 'admin'].includes(profile.role);
   const [{ data: users }, { data: depts }, { data: memberships }, { data: companies }] = await Promise.all([
     supabase.from('profiles').select('*').eq('company_id', companyId).order('full_name'),
-    isSuper
+    crossCompany
       ? supabase.from('departments').select('id, name, company_id').order('name')
       : supabase.from('departments').select('id, name, company_id').eq('company_id', companyId).order('name'),
     supabase.from('department_members').select('department_id, user_id, is_manager'),
-    isSuper
+    crossCompany
       ? supabase.from('companies').select('id, name').eq('is_active', true).order('name')
       : Promise.resolve({ data: [] } as any)
   ]);
@@ -51,7 +53,7 @@ export default async function UsersPage() {
         departments={(depts ?? []) as any}
         companies={(companies ?? []) as any}
         defaultCompanyId={companyId}
-        isSuper={isSuper}
+        isSuper={crossCompany}
       />
 
       <div className="card divide-y divide-white/[0.08] mt-6 overflow-hidden">
