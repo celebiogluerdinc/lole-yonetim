@@ -165,6 +165,33 @@ export async function decidePaymentRequest(id: string, approve: boolean, note?: 
   return { ok: true };
 }
 
+/** Mark an APPROVED payment as done (money transferred). Deciders only. */
+export async function completePaymentRequest(id: string) {
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Geçersiz talep.' };
+  const { supabase, profile, managedDepartmentIds } = await getCtx();
+  if (!(['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0)) {
+    return { error: 'Bu işlemi yalnızca yönetici ve müdürler yapabilir.' };
+  }
+  const { data: req } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
+  if (!req) return { error: 'Talep bulunamadı.' };
+  if (req.status !== 'approved') return { error: 'Yalnızca onaylanmış talepler bitirilebilir.' };
+
+  const { error } = await supabase.from('payment_requests')
+    .update({ status: 'completed' }).eq('id', id).eq('status', 'approved');
+  if (error) return { error: error.message };
+
+  await supabase.from('notifications').insert({
+    company_id: req.company_id, user_id: req.requester_id, type: 'custom',
+    payload: { title: '🏁 Ödeme tamamlandı', body: `${req.firm_name} — ${req.work_title}`, url: '/payments' }
+  });
+  pushToUsers([req.requester_id], {
+    title: '🏁 Ödeme tamamlandı', body: `${req.firm_name} — ${req.work_title}`, url: '/payments'
+  }).catch(() => {});
+
+  revalidatePath('/payments');
+  return { ok: true };
+}
+
 /** Requester cancels their own pending payment request. */
 export async function cancelPaymentRequest(id: string) {
   if (!z.string().uuid().safeParse(id).success) return { error: 'Geçersiz talep.' };

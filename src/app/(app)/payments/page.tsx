@@ -30,6 +30,9 @@ export default async function PaymentsPage({
   const fmt = (iso: string) => new Date(iso).toLocaleDateString('tr-TR', {
     timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric'
   });
+  const dayKey = (iso: string) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date(iso));
   const amt = (n: number | null) => n == null ? null
     : n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -44,6 +47,7 @@ export default async function PaymentsPage({
     note: r.note,
     status: r.status,
     date: fmt(r.created_at),
+    day: dayKey(r.created_at),
     requester: r.requester?.full_name ?? '—',
     requesterId: r.requester_id,
     dept: r.departments?.name ?? null,

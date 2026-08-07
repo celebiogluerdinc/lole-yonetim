@@ -163,6 +163,33 @@ export async function decidePurchaseRequest(id: string, approve: boolean, note?:
   return { ok: true };
 }
 
+/** Mark an APPROVED purchase as done (goods bought/delivered). Deciders only. */
+export async function completePurchaseRequest(id: string) {
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Geçersiz talep.' };
+  const { supabase, profile, managedDepartmentIds } = await getCtx();
+  if (!isDecider(profile, managedDepartmentIds)) {
+    return { error: 'Bu işlemi yalnızca yönetici ve müdürler yapabilir.' };
+  }
+  const { data: req } = await supabase.from('purchase_requests').select('*').eq('id', id).maybeSingle();
+  if (!req) return { error: 'Talep bulunamadı.' };
+  if (req.status !== 'approved') return { error: 'Yalnızca onaylanmış talepler bitirilebilir.' };
+
+  const { error } = await supabase.from('purchase_requests')
+    .update({ status: 'completed' }).eq('id', id).eq('status', 'approved');
+  if (error) return { error: error.message };
+
+  await supabase.from('notifications').insert({
+    company_id: req.company_id, user_id: req.requester_id, type: 'custom',
+    payload: { title: '🏁 Satın alma tamamlandı', body: req.title, url: '/purchasing' }
+  });
+  pushToUsers([req.requester_id], {
+    title: '🏁 Satın alma tamamlandı', body: req.title, url: '/purchasing'
+  }).catch(() => {});
+
+  revalidatePath('/purchasing');
+  return { ok: true };
+}
+
 /** Requester cancels their own pending request. */
 export async function cancelPurchaseRequest(id: string) {
   if (!z.string().uuid().safeParse(id).success) return { error: 'Geçersiz talep.' };

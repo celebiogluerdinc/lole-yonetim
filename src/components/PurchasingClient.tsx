@@ -8,13 +8,13 @@ import {
 } from 'lucide-react';
 import {
   createPurchaseRequest, decidePurchaseRequest, cancelPurchaseRequest,
-  savePurchaseRequestAsTemplate, deletePurchaseTemplate
+  completePurchaseRequest, savePurchaseRequestAsTemplate, deletePurchaseTemplate
 } from '@/app/(app)/purchasing/actions';
 import PrintButton, { type PrintTable } from '@/components/PrintButton';
 
 interface Item { product: string; quantity: string | null; unit: string | null; brand: string | null; spec: string | null; }
 interface Req {
-  id: string; title: string; note: string | null; status: string; date: string;
+  id: string; title: string; note: string | null; status: string; date: string; day: string;
   requester: string; requesterId: string; dept: string | null;
   decider: string | null; decisionNote: string | null; items: Item[];
 }
@@ -27,9 +27,14 @@ interface Dept { id: string; name: string; }
 const STATUS: Record<string, { label: string; cls: string }> = {
   pending: { label: 'Bekliyor', cls: 'bg-amber-500/20 text-amber-300' },
   approved: { label: 'Onaylandı', cls: 'bg-emerald-500/20 text-emerald-300' },
+  completed: { label: '🏁 Bitirildi', cls: 'bg-blue-500/20 text-blue-300' },
   rejected: { label: 'Reddedildi', cls: 'bg-rose-500/20 text-rose-300' },
   cancelled: { label: 'İptal', cls: 'bg-white/10 text-[#8E8E93]' }
 };
+
+const FILTERS = [
+  ['pending', 'Bekleyen'], ['approved', 'Onaylanan'], ['completed', 'Bitirilen'], ['all', 'Tümü']
+] as const;
 
 const emptyRow = () => ({ product: '', quantity: '', unit: '', brand: '', spec: '' });
 
@@ -51,7 +56,9 @@ export default function PurchasingClient({
   const [formOpen, setFormOpen] = useState(false);
   const [rows, setRows] = useState([emptyRow()]);
   const [prefill, setPrefill] = useState<{ title?: string; note?: string; deptId?: string }>({});
-  const [filter, setFilter] = useState<'pending' | 'all'>('pending');
+  const [filter, setFilter] = useState<string>('pending');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [expandId, setExpandId] = useState<string | null>(null);
   const [rejectId, setRejectId] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -78,12 +85,28 @@ export default function PurchasingClient({
   const setRow = (i: number, k: string, v: string) =>
     setRows(a => a.map((r, x) => x === i ? { ...r, [k]: v } : r));
 
-  const filtered = filter === 'pending' ? requests.filter(r => r.status === 'pending') : requests;
-  const pendingCount = requests.filter(r => r.status === 'pending').length;
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: requests.length };
+    for (const r of requests) c[r.status] = (c[r.status] ?? 0) + 1;
+    return c;
+  }, [requests]);
 
+  const filtered = useMemo(() => requests.filter(r => {
+    if (filter !== 'all' && r.status !== filter) return false;
+    if (fromDate && r.day < fromDate) return false;
+    if (toDate && r.day > toDate) return false;
+    return true;
+  }), [requests, filter, fromDate, toDate]);
+  const pendingCount = counts.pending ?? 0;
+
+  const fmtTr = (d: string) => d ? new Date(d + 'T12:00:00').toLocaleDateString('tr-TR', {
+    day: 'numeric', month: 'short', year: 'numeric' }) : '';
   const printTable: PrintTable = useMemo(() => ({
     title: 'Satın Alma Talepleri',
-    subtitle: filter === 'pending' ? 'Bekleyen talepler' : 'Tüm talepler',
+    subtitle: [
+      FILTERS.find(f => f[0] === filter)?.[1] ?? 'Tümü',
+      (fromDate || toDate) ? `${fmtTr(fromDate) || '…'} – ${fmtTr(toDate) || '…'}` : ''
+    ].filter(Boolean).join(' · '),
     landscape: true,
     headers: ['Tarih', 'Talep', 'Talep Eden', 'Departman', 'Ürünler', 'Durum', 'Karar'],
     rows: filtered.map(r => [
@@ -92,7 +115,7 @@ export default function PurchasingClient({
       STATUS[r.status]?.label ?? r.status,
       r.decider ? `${r.decider}${r.decisionNote ? ` — ${r.decisionNote}` : ''}` : '—'
     ])
-  }), [filtered, filter]);
+  }), [filtered, filter, fromDate, toDate]);
 
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-8 space-y-5">
@@ -126,16 +149,34 @@ export default function PurchasingClient({
               </button>
             )}
             <div className="segment">
-              <button onClick={() => setFilter('pending')}
-                className={`segment-item ${filter === 'pending' ? 'segment-item-active' : ''}`}>
-                Bekleyen ({pendingCount})
-              </button>
-              <button onClick={() => setFilter('all')}
-                className={`segment-item ${filter === 'all' ? 'segment-item-active' : ''}`}>
-                Tümü ({requests.length})
-              </button>
+              {FILTERS.map(([k, l]) => (
+                <button key={k} onClick={() => setFilter(k)}
+                  className={`segment-item ${filter === k ? 'segment-item-active' : ''}`}>
+                  {l} ({counts[k] ?? 0})
+                </button>
+              ))}
             </div>
             <PrintButton table={printTable} />
+          </div>
+
+          {/* tarih aralığı (liste + PDF için) */}
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label className="label">Başlangıç tarihi</label>
+              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="input !py-2" />
+            </div>
+            <div>
+              <label className="label">Bitiş tarihi</label>
+              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="input !py-2" />
+            </div>
+            {(fromDate || toDate) && (
+              <button onClick={() => { setFromDate(''); setToDate(''); }} className="btn-ghost text-sm">
+                <X size={14} /> Temizle
+              </button>
+            )}
+            <span className="text-[12px] text-[#8E8E93] pb-2.5">
+              {filtered.length} kayıt {(fromDate || toDate) ? 'seçili aralıkta' : ''} — PDF bu listeyi yazdırır
+            </span>
           </div>
 
           {/* ---- FORM ---- */}
@@ -234,9 +275,7 @@ export default function PurchasingClient({
           {filtered.length === 0 && (
             <div className="card p-10 text-center">
               <p className="text-3xl mb-2">🛒</p>
-              <p className="text-[15px] text-[#8E8E93]">
-                {filter === 'pending' ? 'Bekleyen satın alma talebi yok.' : 'Henüz satın alma talebi yok.'}
-              </p>
+              <p className="text-[15px] text-[#8E8E93]">Bu filtre ve tarih aralığında talep yok.</p>
             </div>
           )}
           <div className="space-y-3">
@@ -280,6 +319,13 @@ export default function PurchasingClient({
                       )}
 
                       <div className="flex flex-wrap gap-2">
+                        {r.status === 'approved' && isDecider && (
+                          <button disabled={pending}
+                            onClick={() => run(() => completePurchaseRequest(r.id), 'İşlem bitirildi olarak işaretlendi.')}
+                            className="btn-primary !bg-blue-600 hover:!bg-blue-700 text-sm">
+                            🏁 İşlem Bitirildi
+                          </button>
+                        )}
                         {r.status === 'pending' && isDecider && r.requesterId !== meId && (
                           <>
                             <button disabled={pending}

@@ -249,7 +249,7 @@ export async function createTemplate(formData: FormData): Promise<{ error?: stri
   redirect('/manage/templates');
 }
 
-/** Instantiate a template as a real task. */
+/** Instantiate a template as a real task — with optional daily/weekly/monthly recurrence. */
 export async function instantiateTemplate(formData: FormData): Promise<{ error?: string } | never> {
   const templateId = String(formData.get('template_id') ?? '');
   const due_at = String(formData.get('due_at') ?? '');
@@ -258,6 +258,23 @@ export async function instantiateTemplate(formData: FormData): Promise<{ error?:
   if (!templateId || !due_at || assignees.length === 0) {
     return { error: 'Tarih ve en az bir kişi seçin.' };
   }
+
+  // tekrar seçenekleri (görev oluşturma formundakiyle aynı mantık)
+  const recurParsed = z.object({
+    recur: z.enum(['none', 'daily', 'weekly', 'monthly']),
+    weekdays: z.array(z.string()).default([]),
+    monthday: z.coerce.number().min(1).max(31).optional(),
+    interval: z.coerce.number().min(1).max(90).default(1),
+    count: z.coerce.number().min(1).max(30).default(8)
+  }).safeParse({
+    recur: String(formData.get('recur') ?? 'none'),
+    weekdays: formData.getAll('weekdays').map(String),
+    monthday: formData.get('monthday') || undefined,
+    interval: formData.get('interval') || 1,
+    count: formData.get('count') || 8
+  });
+  if (!recurParsed.success) return { error: 'Tekrar ayarları hatalı.' };
+  const rec = recurParsed.data;
 
   const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
@@ -285,46 +302,67 @@ export async function instantiateTemplate(formData: FormData): Promise<{ error?:
   const dueDate = istDate(due_at);
   if (isNaN(dueDate.getTime())) return { error: 'Geçersiz tarih.' };
 
-  const { data: task, error } = await supabase.from('tasks').insert({
+  // tekrar tarihleri (günlük/haftalık/aylık) — createTask ile aynı üretici
+  const { dates, rruleStr } = buildOccurrences({
+    due_at, recur: rec.recur, weekdays: rec.weekdays,
+    monthday: rec.monthday, interval: rec.interval, count: rec.count, custom_rrule: ''
+  } as any);
+
+  const taskRows = dates.map(d => ({
     company_id: companyId,
     department_id: tpl.department_id,
     title: tpl.name,
     description: tpl.description,
     type: tpl.type,
     created_by: profile.id,
-    due_at: dueDate.toISOString(),
+    due_at: d.toISOString(),
     priority: tpl.default_priority,
     requires_photo: tpl.requires_photo,
     requires_approval: tpl.requires_approval,
-    template_id: tpl.id
-  }).select().single();
-  if (error) return { error: error.message };
+    template_id: tpl.id,
+    recurrence_rule: rruleStr
+  }));
 
-  const { error: aErr } = await supabase.from('task_assignees')
-    .insert(assignees.map(uid => ({ task_id: task.id, user_id: uid })));
+  const { data: created, error } = await supabase.from('tasks')
+    .insert(taskRows).select('id, due_at');
+  if (error) return { error: error.message };
+  const tasks = created ?? [];
+  const parentId = tasks[0]?.id ?? null;
+
+  const { error: aErr } = await supabase.from('task_assignees').insert(
+    tasks.flatMap((t: any) => assignees.map(uid => ({ task_id: t.id, user_id: uid })))
+  );
   if (aErr) return { error: `Atama yapılamadı: ${aErr.message}` };
+
   if (tplItems?.length) {
     const { error: iErr } = await supabase.from('checklist_items').insert(
-      tplItems.map((it: any) => ({
-        task_id: task.id, title: it.title, position: it.position, requires_photo: it.requires_photo
-      }))
+      tasks.flatMap((t: any) => (tplItems as any[]).map((it: any) => ({
+        task_id: t.id, title: it.title, position: it.position, requires_photo: it.requires_photo
+      })))
     );
     if (iErr) return { error: `Checklist oluşturulamadı: ${iErr.message}` };
   }
+
+  if (tasks.length > 1) {
+    await supabase.from('tasks').update({ parent_recurring_id: parentId })
+      .in('id', tasks.slice(1).map((t: any) => t.id));
+  }
+
   await supabase.from('notifications').insert(
-    assignees.map(uid => ({
+    tasks.flatMap((t: any) => assignees.map(uid => ({
       company_id: companyId, user_id: uid, type: 'task_assigned',
-      payload: { task_id: task.id, title: tpl.name }
-    }))
+      payload: { task_id: t.id, title: tpl.name, due_at: t.due_at }
+    })))
   );
   pushToUsers(assignees, {
     title: '📋 Size yeni görev atandı',
-    body: tpl.name,
-    url: `/tasks/${task.id}`
+    body: tasks.length > 1 ? `${tpl.name} (${tasks.length} tekrar)` : tpl.name,
+    url: parentId ? `/tasks/${parentId}` : '/home'
   }).catch(() => {});
+
   revalidatePath('/home');
   revalidatePath('/manage/tasks');
-  redirect(`/tasks/${task.id}`);
+  redirect(tasks.length > 1 ? '/manage/tasks' : `/tasks/${parentId}`);
 }
 
 /**

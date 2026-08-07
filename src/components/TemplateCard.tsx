@@ -21,6 +21,7 @@ export default function TemplateCard({
   const [pending, start] = useTransition();
   const [editItems, setEditItems] = useState<string[]>(items.map(i => i.title));
   const [newItemText, setNewItemText] = useState('');
+  const [recur, setRecur] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none');
 
   function addEditItem() {
     const t = newItemText.trim();
@@ -182,7 +183,7 @@ export default function TemplateCard({
           {error && <p className="text-sm text-rose-300">{error}</p>}
           <div className="grid sm:grid-cols-2 gap-3">
             <div>
-              <label className="label">Tarih &amp; saat</label>
+              <label className="label">{recur === 'none' ? 'Tarih & saat' : 'İlk görev tarihi & saati'}</label>
               <input name="due_at" type="datetime-local" required className="input" />
             </div>
             <div>
@@ -197,8 +198,50 @@ export default function TemplateCard({
               </div>
             </div>
           </div>
+
+          {/* Tekrarlama */}
+          <div className="space-y-2.5">
+            <div>
+              <label className="label">Tekrarlama</label>
+              <input type="hidden" name="recur" value={recur} />
+              <div className="segment">
+                {([['none', 'Tek seferlik'], ['daily', 'Günlük'], ['weekly', 'Haftalık'], ['monthly', 'Aylık']] as const).map(([k, l]) => (
+                  <button key={k} type="button" onClick={() => setRecur(k)}
+                    className={`segment-item ${recur === k ? 'segment-item-active' : ''}`}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {recur === 'weekly' && (
+              <div className="flex gap-1.5 flex-wrap">
+                {([['MO', 'Pzt'], ['TU', 'Sal'], ['WE', 'Çar'], ['TH', 'Per'], ['FR', 'Cum'], ['SA', 'Cmt'], ['SU', 'Paz']] as const).map(([k, l]) => (
+                  <label key={k} className="cursor-pointer">
+                    <input type="checkbox" name="weekdays" value={k} className="peer hidden" />
+                    <span className="inline-block rounded-lg bg-ios-fill px-3 py-1.5 text-[13px] font-medium peer-checked:bg-ios-blue peer-checked:text-white transition-colors">
+                      {l}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {recur === 'monthly' && (
+              <div className="w-40">
+                <label className="label">Ayın günü (ops.)</label>
+                <input name="monthday" type="number" min={1} max={31} className="input" placeholder="Örn. 1" />
+              </div>
+            )}
+            {recur !== 'none' && (
+              <div className="w-40">
+                <label className="label">Kaç kez tekrarlasın</label>
+                <input name="count" type="number" min={1} max={30} defaultValue={8} className="input" />
+              </div>
+            )}
+          </div>
+
           <button className="btn-primary w-full" disabled={pending}>
-            {pending ? 'Atanıyor…' : 'Görev Olarak Ata'}
+            {pending ? 'Atanıyor…'
+              : recur === 'none' ? 'Görev Olarak Ata' : 'Tekrarlayan Görevleri Oluştur'}
           </button>
         </form>
       )}

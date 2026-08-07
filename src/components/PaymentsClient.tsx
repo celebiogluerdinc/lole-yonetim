@@ -7,14 +7,15 @@ import {
   Plus, X, Trash2, Wallet, LayoutTemplate, ThumbsUp, ThumbsDown, Ban, ChevronDown
 } from 'lucide-react';
 import {
-  createPaymentRequest, decidePaymentRequest, cancelPaymentRequest, deletePaymentTemplate
+  createPaymentRequest, decidePaymentRequest, cancelPaymentRequest,
+  completePaymentRequest, deletePaymentTemplate
 } from '@/app/(app)/payments/actions';
 import PrintButton, { type PrintTable } from '@/components/PrintButton';
 
 interface Req {
   id: string; workTitle: string; workDetail: string | null; firm: string;
   taxNo: string | null; iban: string | null; amount: string | null; note: string | null;
-  status: string; date: string; requester: string; requesterId: string;
+  status: string; date: string; day: string; requester: string; requesterId: string;
   dept: string | null; decider: string | null; decisionNote: string | null;
 }
 interface Tpl {
@@ -27,9 +28,14 @@ interface Dept { id: string; name: string; }
 const STATUS: Record<string, { label: string; cls: string }> = {
   pending: { label: 'Bekliyor', cls: 'bg-amber-500/20 text-amber-300' },
   approved: { label: 'Onaylandı', cls: 'bg-emerald-500/20 text-emerald-300' },
+  completed: { label: '🏁 Bitirildi', cls: 'bg-blue-500/20 text-blue-300' },
   rejected: { label: 'Reddedildi', cls: 'bg-rose-500/20 text-rose-300' },
   cancelled: { label: 'İptal', cls: 'bg-white/10 text-[#8E8E93]' }
 };
+
+const FILTERS = [
+  ['pending', 'Bekleyen'], ['approved', 'Onaylanan'], ['completed', 'Bitirilen'], ['all', 'Tümü']
+] as const;
 
 export default function PaymentsClient({
   tab, requests, templates, departments, meId, isAdmin, isDecider
@@ -44,7 +50,9 @@ export default function PaymentsClient({
   const [ok, setOk] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [prefill, setPrefill] = useState<Partial<Tpl>>({});
-  const [filter, setFilter] = useState<'pending' | 'all'>('pending');
+  const [filter, setFilter] = useState<string>('pending');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [expandId, setExpandId] = useState<string | null>(null);
   const [rejectId, setRejectId] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -62,19 +70,35 @@ export default function PaymentsClient({
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   }
 
-  const filtered = filter === 'pending' ? requests.filter(r => r.status === 'pending') : requests;
-  const pendingCount = requests.filter(r => r.status === 'pending').length;
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: requests.length };
+    for (const r of requests) c[r.status] = (c[r.status] ?? 0) + 1;
+    return c;
+  }, [requests]);
 
+  const filtered = useMemo(() => requests.filter(r => {
+    if (filter !== 'all' && r.status !== filter) return false;
+    if (fromDate && r.day < fromDate) return false;
+    if (toDate && r.day > toDate) return false;
+    return true;
+  }), [requests, filter, fromDate, toDate]);
+  const pendingCount = counts.pending ?? 0;
+
+  const fmtTr = (d: string) => d ? new Date(d + 'T12:00:00').toLocaleDateString('tr-TR', {
+    day: 'numeric', month: 'short', year: 'numeric' }) : '';
   const printTable: PrintTable = useMemo(() => ({
     title: 'Ödeme Talepleri',
-    subtitle: filter === 'pending' ? 'Bekleyen talepler' : 'Tüm talepler',
+    subtitle: [
+      FILTERS.find(f => f[0] === filter)?.[1] ?? 'Tümü',
+      (fromDate || toDate) ? `${fmtTr(fromDate) || '…'} – ${fmtTr(toDate) || '…'}` : ''
+    ].filter(Boolean).join(' · '),
     landscape: true,
     headers: ['Tarih', 'Yapılan İş', 'Firma', 'Vergi No', 'IBAN', 'Tutar', 'Talep Eden', 'Durum'],
     rows: filtered.map(r => [
       r.date, r.workTitle, r.firm, r.taxNo ?? '—', r.iban ?? '—',
       r.amount ? `${r.amount} TL` : '—', r.requester, STATUS[r.status]?.label ?? r.status
     ])
-  }), [filtered, filter]);
+  }), [filtered, filter, fromDate, toDate]);
 
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-8 space-y-5">
@@ -108,16 +132,34 @@ export default function PaymentsClient({
               </button>
             )}
             <div className="segment">
-              <button onClick={() => setFilter('pending')}
-                className={`segment-item ${filter === 'pending' ? 'segment-item-active' : ''}`}>
-                Bekleyen ({pendingCount})
-              </button>
-              <button onClick={() => setFilter('all')}
-                className={`segment-item ${filter === 'all' ? 'segment-item-active' : ''}`}>
-                Tümü ({requests.length})
-              </button>
+              {FILTERS.map(([k, l]) => (
+                <button key={k} onClick={() => setFilter(k)}
+                  className={`segment-item ${filter === k ? 'segment-item-active' : ''}`}>
+                  {l} ({counts[k] ?? 0})
+                </button>
+              ))}
             </div>
             <PrintButton table={printTable} />
+          </div>
+
+          {/* tarih aralığı (liste + PDF için) */}
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label className="label">Başlangıç tarihi</label>
+              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="input !py-2" />
+            </div>
+            <div>
+              <label className="label">Bitiş tarihi</label>
+              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="input !py-2" />
+            </div>
+            {(fromDate || toDate) && (
+              <button onClick={() => { setFromDate(''); setToDate(''); }} className="btn-ghost text-sm">
+                <X size={14} /> Temizle
+              </button>
+            )}
+            <span className="text-[12px] text-[#8E8E93] pb-2.5">
+              {filtered.length} kayıt {(fromDate || toDate) ? 'seçili aralıkta' : ''} — PDF bu listeyi yazdırır
+            </span>
           </div>
 
           {/* ---- FORM ---- */}
@@ -210,9 +252,7 @@ export default function PaymentsClient({
           {filtered.length === 0 && (
             <div className="card p-10 text-center">
               <p className="text-3xl mb-2">💸</p>
-              <p className="text-[15px] text-[#8E8E93]">
-                {filter === 'pending' ? 'Bekleyen ödeme talebi yok.' : 'Henüz ödeme talebi yok.'}
-              </p>
+              <p className="text-[15px] text-[#8E8E93]">Bu filtre ve tarih aralığında talep yok.</p>
             </div>
           )}
           <div className="space-y-3">
@@ -253,6 +293,13 @@ export default function PaymentsClient({
                       )}
 
                       <div className="flex flex-wrap gap-2 pt-1">
+                        {r.status === 'approved' && isDecider && (
+                          <button disabled={pending}
+                            onClick={() => run(() => completePaymentRequest(r.id), 'Ödeme bitirildi olarak işaretlendi.')}
+                            className="btn-primary !bg-blue-600 hover:!bg-blue-700 text-sm">
+                            🏁 İşlem Bitirildi
+                          </button>
+                        )}
                         {r.status === 'pending' && isDecider && r.requesterId !== meId && (
                           <>
                             <button disabled={pending}
