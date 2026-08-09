@@ -5,12 +5,13 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Plus, Search, Camera, ClipboardList, ShieldCheck, ChevronRight, Flag,
-  CheckCheck, Ban
+  CheckCheck, Ban, ThumbsUp
 } from 'lucide-react';
 import { TZ } from '@/lib/utils';
-import { managerSetTaskStatus } from '@/app/(app)/tasks/actions';
+import { managerSetTaskStatus, reviewTask } from '@/app/(app)/tasks/actions';
 import AutoRefresh from '@/components/AutoRefresh';
 import PrintButton, { type PrintTable } from '@/components/PrintButton';
+import { useConfirm } from '@/components/ConfirmProvider';
 
 interface Row {
   id: string; title: string; type: string; status: string; priority: string;
@@ -60,6 +61,7 @@ export default function TaskBoard({
   rows, departments, initialFilter = 'active'
 }: { rows: Row[]; departments: { id: string; name: string }[]; initialFilter?: string }) {
   const router = useRouter();
+  const confirmS = useConfirm();
   const [, startBg] = useTransition();
   const [filter, setFilter] = useState<string>(
     FILTERS.some(f => f.key === initialFilter) ? initialFilter : 'active'
@@ -69,6 +71,23 @@ export default function TaskBoard({
   // optimistic status overrides — quick actions feel instant
   const [override, setOverride] = useState<Record<string, string>>({});
   const [actionErr, setActionErr] = useState<string | null>(null);
+
+  /** onay bekleyen görevi listeden tek tıkla onayla */
+  async function quickApprove(id: string, title: string) {
+    if (!(await confirmS({ message: `"${title}" onaylansın mı?`, okText: 'Onayla' }))) return;
+    setActionErr(null);
+    const prev = override[id];
+    setOverride(o => ({ ...o, [id]: 'completed' })); // instant
+    startBg(async () => {
+      const r = await reviewTask(id, true);
+      if (r?.error) {
+        setOverride(o => ({ ...o, [id]: prev ?? '' }));
+        setActionErr(r.error);
+      } else {
+        router.refresh();
+      }
+    });
+  }
 
   function quickSet(id: string, status: 'completed' | 'cancelled') {
     setActionErr(null);
@@ -243,16 +262,26 @@ export default function TaskBoard({
               </div>
               {!['completed', 'cancelled'].includes(e) && (
                 <span className="flex gap-1 shrink-0" onClick={ev => { ev.preventDefault(); ev.stopPropagation(); }}>
+                  {e === 'pending_review' && (
+                    <button
+                      title="Onayla (onay bekliyor)"
+                      aria-label="Onayla"
+                      onClick={() => quickApprove(r.id, r.title)}
+                      className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center hover:bg-amber-500/35 active:scale-90 transition-all"
+                    >
+                      <ThumbsUp size={14} />
+                    </button>
+                  )}
                   <button
                     title="Görevi bitir"
-                    onClick={() => { if (window.confirm(`"${r.title}" tamamlandı olarak işaretlensin mi?`)) quickSet(r.id, 'completed'); }}
+                    onClick={async () => { if (await confirmS({ message: `"${r.title}" tamamlandı olarak işaretlensin mi?`, okText: 'Onayla' })) quickSet(r.id, 'completed'); }}
                     className="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-300 flex items-center justify-center hover:bg-emerald-500/30 active:scale-90 transition-all"
                   >
                     <CheckCheck size={15} />
                   </button>
                   <button
                     title="Görevi iptal et"
-                    onClick={() => { if (window.confirm(`"${r.title}" iptal edilsin mi?`)) quickSet(r.id, 'cancelled'); }}
+                    onClick={async () => { if (await confirmS({ message: `"${r.title}" iptal edilsin mi?`, danger: true })) quickSet(r.id, 'cancelled'); }}
                     className="w-8 h-8 rounded-full bg-rose-500/15 text-rose-300 flex items-center justify-center hover:bg-rose-500/30 active:scale-90 transition-all"
                   >
                     <Ban size={14} />

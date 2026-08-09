@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pencil, Plus, Trash2, X } from 'lucide-react';
 import { updateTask, deleteChecklistItem } from '@/app/(app)/tasks/actions';
+import { useConfirm } from '@/components/ConfirmProvider';
 
 interface Person { id: string; full_name: string; }
 interface Item { id: string; title: string; is_done: boolean; }
@@ -14,13 +15,15 @@ export default function TaskEdit({
   task, dueLocal, items, people, assigneeIds
 }: {
   task: { id: string; title: string; description: string | null; priority: string;
-          requires_photo: boolean; requires_approval: boolean; type: string };
+          requires_photo: boolean; requires_approval: boolean; type: string;
+          recurrence_rule?: string | null; parent_recurring_id?: string | null };
   dueLocal: string;            // "YYYY-MM-DDTHH:mm" (Istanbul)
   items: Item[];
   people: Person[];
   assigneeIds: string[];
 }) {
   const router = useRouter();
+  const confirmS = useConfirm();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -36,8 +39,8 @@ export default function TaskEdit({
     setNewItemText('');
   }
 
-  function removeExistingItem(it: Item) {
-    if (!window.confirm(`"${it.title}" maddesi silinsin mi?`)) return;
+  async function removeExistingItem(it: Item) {
+    if (!(await confirmS({ message: `"${it.title}" maddesi silinsin mi?`, danger: true }))) return;
     setRemovedItems(s => new Set(s).add(it.id)); // optimistic
     start(async () => {
       const r = await deleteChecklistItem(it.id);
@@ -146,7 +149,7 @@ export default function TaskEdit({
                 {it.title}
               </span>
               <button type="button" onClick={() => removeExistingItem(it)} title="Maddeyi sil"
-                className="w-6 h-6 rounded-full bg-rose-500/15 text-rose-300 flex items-center justify-center hover:bg-rose-500/30 shrink-0">
+                className="w-7 h-7 rounded-full bg-rose-500/15 text-rose-300 flex items-center justify-center hover:bg-rose-500/30 shrink-0">
                 <Trash2 size={12} />
               </button>
             </div>
@@ -155,7 +158,7 @@ export default function TaskEdit({
             <div key={`n${i}`} className="flex items-center gap-2 rounded-xl bg-ios-blue/10 border border-ios-blue/25 px-3 py-2">
               <span className="flex-1 text-sm truncate">{t} <em className="text-[11px] text-ios-blue">(yeni)</em></span>
               <button type="button" onClick={() => setNewItems(a => a.filter((_, x) => x !== i))}
-                className="w-6 h-6 rounded-full bg-white/10 text-[#8E8E93] flex items-center justify-center shrink-0">
+                className="w-7 h-7 rounded-full bg-white/10 text-[#8E8E93] flex items-center justify-center shrink-0">
                 <X size={12} />
               </button>
             </div>
@@ -173,6 +176,19 @@ export default function TaskEdit({
             </button>
           </div>
         </div>
+      )}
+
+      {(task.recurrence_rule || task.parent_recurring_id) && (
+        <label className="flex items-start gap-2 text-sm cursor-pointer rounded-xl bg-ios-blue/10 border border-ios-blue/25 px-3 py-2.5">
+          <input type="checkbox" name="apply_series" className="rounded accent-[#0A84FF] w-4 h-4 mt-0.5" />
+          <span>
+            🔁 <b>Serinin kalanına da uygula</b>
+            <span className="block text-[12px] text-[#8E8E93]">
+              Başlık, açıklama, öncelik, gereksinimler ve atanan kişiler bu serinin GELECEKTEKİ açık
+              tekrarlarına da işlenir. Tarihler değişmez.
+            </span>
+          </span>
+        </label>
       )}
 
       <button className="btn-primary w-full" disabled={pending}>

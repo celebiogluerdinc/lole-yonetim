@@ -283,22 +283,46 @@ export default async function HomePage({
         ))}
       </div>
 
-      {/* Active list */}
+      {/* Active list — gün başlıklarıyla gruplu */}
       <section>
         <h2 className="section-title" style={{ color: activeSmart.color }}>{activeSmart.label}</h2>
-        <div className="card divide-y divide-white/[0.08] overflow-hidden">
-          {filtered.length === 0 && (
-            <div className="p-10 text-center">
-              <p className="text-3xl mb-2">🎉</p>
-              <p className="text-[15px] text-[#8E8E93]">
-                {tab === 'today' ? 'Bugün için görev yok — harika iş!' : 'Bu listede görev yok.'}
-              </p>
+        {filtered.length === 0 && (
+          <div className="card p-10 text-center">
+            <p className="text-3xl mb-2">🎉</p>
+            <p className="text-[15px] text-[#8E8E93]">
+              {tab === 'today' ? 'Bugün için görev yok — harika iş!' : 'Bu listede görev yok.'}
+            </p>
+          </div>
+        )}
+        {(() => {
+          // görevleri güne göre grupla (Bugün / Yarın / tarih) — tekrarlar karışmasın
+          const dayKeyOf = (iso: string | null) => iso
+            ? new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date(iso))
+            : 'tarihsiz';
+          const todayK = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
+          const tomorrowK = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date(Date.now() + 86400000));
+          const labelOf = (k: string) => k === 'tarihsiz' ? '📌 Tarihsiz'
+            : k === todayK ? '🔵 Bugün'
+            : k === tomorrowK ? '🟠 Yarın'
+            : k < todayK ? `🔴 ${new Date(k + 'T12:00:00Z').toLocaleDateString('tr-TR', { timeZone: 'UTC', day: 'numeric', month: 'long', weekday: 'long' })} (geçmiş)`
+            : new Date(k + 'T12:00:00Z').toLocaleDateString('tr-TR', { timeZone: 'UTC', day: 'numeric', month: 'long', weekday: 'long' });
+          const groups: Record<string, typeof filtered> = {};
+          for (const t of filtered) (groups[dayKeyOf(t.due_at)] ??= [] as any).push(t);
+          const keys = Object.keys(groups).sort((a, b) =>
+            a === 'tarihsiz' ? 1 : b === 'tarihsiz' ? -1 : a.localeCompare(b));
+          return keys.map(k => (
+            <div key={k} className="mb-4">
+              <h3 className="text-[13px] font-semibold text-[#8E8E93] px-1 mb-1.5 capitalize">
+                {labelOf(k)} · {groups[k].length} görev
+              </h3>
+              <div className="card divide-y divide-white/[0.08] overflow-hidden">
+                {groups[k].map(t => (
+                  <TaskRow key={t.id} task={t} progress={progress[t.id]} />
+                ))}
+              </div>
             </div>
-          )}
-          {filtered.map(t => (
-            <TaskRow key={t.id} task={t} progress={progress[t.id]} />
-          ))}
-        </div>
+          ));
+        })()}
       </section>
 
       {/* Mesajlar */}

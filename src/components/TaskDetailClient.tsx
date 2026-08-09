@@ -2,14 +2,16 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Camera, Paperclip, Send, AlertTriangle, ThumbsUp, ThumbsDown, Ban, CheckCheck, LayoutTemplate } from 'lucide-react';
+import { Check, Camera, Paperclip, Send, AlertTriangle, ThumbsUp, ThumbsDown, Ban, CheckCheck, LayoutTemplate, Play, Clock3, Repeat } from 'lucide-react';
 import type { Task, ChecklistItem } from '@/lib/types';
 import { fmtDate } from '@/lib/utils';
 import {
   toggleChecklistItem, completeTask, blockTask, reviewTask,
-  uploadAttachment, addTaskNote, managerSetTaskStatus
+  uploadAttachment, addTaskNote, managerSetTaskStatus,
+  startTask, requestPostpone, cancelTaskSeries
 } from '@/app/(app)/tasks/actions';
 import { saveTaskAsTemplate } from '@/app/(app)/manage/actions';
+import { useConfirm } from '@/components/ConfirmProvider';
 
 interface Att { id: string; file_name: string; mime_type: string | null; url?: string; created_at: string; checklist_item_id: string | null; ai_verdict?: string | null; ai_note?: string | null; }
 interface NoteT { id: string; author_id?: string; body: string; created_at: string; profiles?: { full_name: string } | null; }
@@ -35,10 +37,14 @@ export default function TaskDetailClient({
   isAssignee: boolean; canReview: boolean; meId?: string;
 }) {
   const router = useRouter();
+  const confirmS = useConfirm();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [tplOk, setTplOk] = useState<string | null>(null);
   const [blockOpen, setBlockOpen] = useState(false);
+  const [postponeOpen, setPostponeOpen] = useState(false);
+  const [postponeOk, setPostponeOk] = useState(false);
+  const isSeries = !!((task as any).recurrence_rule || (task as any).parent_recurring_id);
   const [rejectOpen, setRejectOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const itemFileRef = useRef<HTMLInputElement>(null);
@@ -57,13 +63,13 @@ export default function TaskDetailClient({
   const allItemsDone = items.length === 0 || items.every(i => itemDone(i));
   const dueInfo = dueDayInfo(task.due_at);
 
-  const confirmFuture = () =>
+  const confirmFuture = async () =>
     !dueInfo?.future ||
-    window.confirm(`Bu görev İLERİ TARİHLİ: ${dueInfo.label}.\nBugünün görevi değil — yine de tamamlansın mı?`);
+    (await confirmS({ message: `Bu görev İLERİ TARİHLİ: ${dueInfo.label}.\nBugünün görevi değil — yine de tamamlansın mı?`, okText: 'Onayla' }));
 
-  function onToggleItem(item: ChecklistItem) {
+  async function onToggleItem(item: ChecklistItem) {
     const next = !itemDone(item);
-    if (next && !confirmFuture()) return; // ileri tarihli görevin maddesi onaysız işaretlenmesin
+    if (next && !(await confirmFuture())) return; // ileri tarihli görevin maddesi onaysız işaretlenmesin
     setItemOverride(o => ({ ...o, [item.id]: next })); // instant
     start(async () => {
       const r = await toggleChecklistItem(item.id, next);
@@ -277,10 +283,21 @@ export default function TaskDetailClient({
 
       {/* Primary actions */}
       {!finished && !inReview && isAssignee && (
+        <>
         <div className="flex flex-col sm:flex-row gap-2">
+          {task.status === 'open' && (
+            <button
+              disabled={pending}
+              onClick={() => run(() => startTask(task.id))}
+              className="btn-outline !py-3 !text-ios-blue"
+              title="Göreve başladığınızı işaretler — yöneticiniz devam ettiğinizi görür"
+            >
+              <Play size={16} /> Başla
+            </button>
+          )}
           <button
             disabled={pending || (task.type === 'checklist' && !allItemsDone)}
-            onClick={() => { if (confirmFuture()) run(() => completeTask(task.id, dueInfo?.future === true)); }}
+            onClick={async () => { if (await confirmFuture()) run(() => completeTask(task.id, dueInfo?.future === true)); }}
             className="btn-primary flex-1 !py-3"
           >
             <Check size={17} strokeWidth={3} />
@@ -288,12 +305,40 @@ export default function TaskDetailClient({
           </button>
           <button
             disabled={pending}
-            onClick={() => setBlockOpen(v => !v)}
+            onClick={() => { setBlockOpen(v => !v); setPostponeOpen(false); }}
             className="btn-outline !py-3 text-rose-300 !border-rose-500/30 hover:!bg-rose-500/15"
           >
             <AlertTriangle size={16} /> Engel Bildir
           </button>
+          <button
+            disabled={pending}
+            onClick={() => { setPostponeOpen(v => !v); setBlockOpen(false); }}
+            className="btn-outline !py-3 !text-amber-300 !border-amber-500/30"
+          >
+            <Clock3 size={16} /> Erteleme Talep Et
+          </button>
         </div>
+        {postponeOk && (
+          <p className="text-[13px] text-emerald-300 bg-emerald-500/10 rounded-xl px-3 py-2">
+            ✔ Erteleme talebiniz yöneticinize iletildi — görev tarihi yönetici onaylarsa değiştirilir.
+          </p>
+        )}
+        {postponeOpen && (
+          <form
+            action={(fd) => run(async () => {
+              const r = await requestPostpone(task.id, String(fd.get('reason') ?? ''));
+              if (!r?.error) { setPostponeOpen(false); setPostponeOk(true); }
+              return r;
+            })}
+            className="card p-4 space-y-3 border-amber-500/30"
+          >
+            <label className="label">Neden erteleme istiyorsunuz? (yöneticinize iletilecek)</label>
+            <textarea name="reason" required rows={2} className="input"
+              placeholder="Örn: Malzeme yarın geliyor, bir gün erteleme rica ediyorum…" />
+            <button className="btn-primary w-full !bg-none !bg-amber-600" disabled={pending}>Erteleme Talebini Gönder</button>
+          </form>
+        )}
+        </>
       )}
       {task.type === 'checklist' && !allItemsDone && !finished && !inReview && (
         <p className="text-xs text-[#AEAEB2] text-center -mt-2">Görevi kapatmak için önce tüm maddeleri tamamlayın.</p>
@@ -366,8 +411,8 @@ export default function TaskDetailClient({
                 </button>
                 <button
                   disabled={pending}
-                  onClick={() => {
-                    if (window.confirm('Bu görev iptal edilsin mi?')) {
+                  onClick={async () => {
+                    if (await confirmS({ message: 'Bu görev iptal edilsin mi?', danger: true })) {
                       run(() => managerSetTaskStatus(task.id, 'cancelled'));
                     }
                   }}
@@ -391,6 +436,19 @@ export default function TaskDetailClient({
               <LayoutTemplate size={15} /> Şablonlara Ekle
             </button>
           </div>
+          {isSeries && (
+            <button
+              disabled={pending}
+              onClick={async () => {
+                if (await confirmS({ message: 'Bu tekrarlayan serinin GELECEKTEKİ tüm açık görevleri iptal edilsin mi?\n(Geçmiş ve tamamlanmış olanlar korunur.)', danger: true })) {
+                  run(() => cancelTaskSeries(task.id));
+                }
+              }}
+              className="btn-outline w-full !text-rose-300 !border-rose-500/30"
+            >
+              <Repeat size={15} /> Serinin Kalanını İptal Et
+            </button>
+          )}
         </>
       )}
     </div>

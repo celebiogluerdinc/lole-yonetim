@@ -187,13 +187,22 @@ export default async function CalendarPage({
           ))}
         </div>
         <div className="grid grid-cols-7 gap-1">
-          {Array.from({ length: firstOffset }).map((_, i) => <div key={`e${i}`} />)}
+          {/* önceki ayın kuyruğu — soluk */}
+          {Array.from({ length: firstOffset }).map((_, i) => {
+            const prevMonthDays = new Date(Date.UTC(y, m - 1, 0)).getUTCDate();
+            return (
+              <div key={`e${i}`} className="aspect-square rounded-xl flex items-center justify-center text-[12px] text-white/[0.15]">
+                {prevMonthDays - firstOffset + i + 1}
+              </div>
+            );
+          })}
           {Array.from({ length: daysInMonth }).map((_, i) => {
             const dayNum = i + 1;
             const iso = isoOf(dayNum);
             const dots = gridDots[iso];
             const isToday = iso === todayIso;
             const isSel = iso === selDay;
+            const isWeekend = (firstOffset + i) % 7 >= 5;
             return (
               <Link
                 key={iso}
@@ -202,8 +211,8 @@ export default async function CalendarPage({
                 className={`relative aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 text-[13px] transition-colors ${
                   isSel ? `bg-ios-blue text-white font-bold${isToday ? ' ring-2 ring-white/40' : ''}`
                   : isToday ? 'bg-ios-blue/15 text-ios-blue font-bold'
-                  : dots ? 'bg-white/[0.05] hover:bg-white/[0.10]'
-                  : 'text-[#8E8E93] hover:bg-white/[0.05]'
+                  : dots ? `${isWeekend ? 'bg-white/[0.08]' : 'bg-white/[0.05]'} hover:bg-white/[0.12]`
+                  : `${isWeekend ? 'bg-white/[0.03] ' : ''}text-[#8E8E93] hover:bg-white/[0.05]`
                 }`}
               >
                 {dayNum}
@@ -217,6 +226,12 @@ export default async function CalendarPage({
               </Link>
             );
           })}
+          {/* sonraki ayın başı — soluk (son hafta satırı tamamlanır) */}
+          {Array.from({ length: (7 - (firstOffset + daysInMonth) % 7) % 7 }).map((_, i) => (
+            <div key={`n${i}`} className="aspect-square rounded-xl flex items-center justify-center text-[12px] text-white/[0.15]">
+              {i + 1}
+            </div>
+          ))}
         </div>
       </div>
 

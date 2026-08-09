@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ChevronLeft, ArrowUp, ChevronDown, Pencil, Trash2, X } from 'lucide-react';
 import { sendMessage, editMessage, deleteMessage, markRead } from '@/app/(app)/messages/actions';
+import { useConfirm } from '@/components/ConfirmProvider';
 import { TZ } from '@/lib/utils';
 
 interface Msg {
@@ -32,6 +33,7 @@ export default function ChatThread({
   isGroup: boolean; names: Record<string, string>; messages: Msg[];
 }) {
   const router = useRouter();
+  const confirmS = useConfirm();
   const [pending, start] = useTransition();
   const [text, setText] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
@@ -93,9 +95,9 @@ export default function ChatThread({
     setTimeout(() => inputRef.current?.focus(), 50);
   }
 
-  function onDelete(m: Msg) {
+  async function onDelete(m: Msg) {
     setMenuFor(null);
-    if (!window.confirm('Bu mesaj silinsin mi?')) return;
+    if (!(await confirmS({ message: 'Bu mesaj silinsin mi?', danger: true }))) return;
     setHidden(h => new Set(h).add(m.id)); // iyimser: anında "silindi" göster
     start(async () => {
       const r = await deleteMessage(m.id);

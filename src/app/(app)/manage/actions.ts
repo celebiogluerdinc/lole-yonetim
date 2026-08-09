@@ -40,8 +40,14 @@ function istDate(s: string): Date {
 }
 
 function buildOccurrences(input: z.infer<typeof TaskSchema>): { dates: Date[]; rruleStr: string | null } {
-  const dtstart = istDate(input.due_at);
-  if (input.recur === 'none') return { dates: [dtstart], rruleStr: null };
+  const real = istDate(input.due_at);
+  if (input.recur === 'none') return { dates: [real], rruleStr: null };
+
+  // RRule gün hesabını UTC bileşenleriyle yapar; İstanbul duvar saatini
+  // "sahte UTC" olarak kurup sonuçtan +03:00 ofsetini geri çıkarıyoruz —
+  // böylece gece 00:00-02:59 görevlerinde haftanın/ayın günü kaymaz.
+  const IST_OFFSET = 3 * 3600 * 1000;
+  const dtstart = new Date(real.getTime() + IST_OFFSET);
 
   let rule: RRule;
   if (input.recur === 'custom' && input.custom_rrule) {
@@ -60,8 +66,8 @@ function buildOccurrences(input: z.infer<typeof TaskSchema>): { dates: Date[]; r
       ...(input.monthday ? { bymonthday: input.monthday } : {})
     });
   }
-  const dates = rule.all();
-  return { dates: dates.length ? dates : [dtstart], rruleStr: rule.toString() };
+  const dates = rule.all().map(d => new Date(d.getTime() - IST_OFFSET));
+  return { dates: dates.length ? dates : [real], rruleStr: rule.toString() };
 }
 
 /** Manager/admin creates a task or checklist series and assigns it. */

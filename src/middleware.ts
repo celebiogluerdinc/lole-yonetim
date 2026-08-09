@@ -5,7 +5,7 @@ export async function middleware(request: NextRequest) {
   // Cron endpoints authenticate with CRON_SECRET themselves — cookie auth would
   // 307 them to /login and silently break push delivery + weekly reports.
   const { pathname } = request.nextUrl;
-  if (pathname === '/api/push' || pathname === '/api/report') {
+  if (pathname === '/api/push' || pathname === '/api/report' || pathname === '/api/risk') {
     return NextResponse.next();
   }
 

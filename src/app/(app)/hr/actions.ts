@@ -117,6 +117,32 @@ export async function addShift(formData: FormData) {
   if (rows.length === 0) return { error: 'Oluşturulacak vardiya bulunamadı.' };
   if (rows.length > 400) return { error: 'Tek seferde en fazla 400 vardiya oluşturulabilir.' };
 
+  // vardiya–izin çakışma kontrolü: onaylı izindeki kişiye o güne vardiya yazılamaz
+  const minDate = baseDates[0].toISOString().slice(0, 10);
+  const maxDate = baseDates[baseDates.length - 1].toISOString().slice(0, 10);
+  const { data: leaves } = await supabase
+    .from('leave_requests')
+    .select('user_id, start_date, end_date, profiles:user_id(full_name)')
+    .eq('status', 'approved')
+    .in('user_id', i.user_ids)
+    .lte('start_date', maxDate)
+    .gte('end_date', minDate);
+  if (leaves?.length) {
+    const conflicts: string[] = [];
+    for (const l of leaves) {
+      const hit = baseDates.some(d => {
+        const ds = d.toISOString().slice(0, 10);
+        return ds >= l.start_date && ds <= l.end_date;
+      });
+      if (hit) {
+        conflicts.push(`${(l as any).profiles?.full_name ?? 'Personel'} (${l.start_date} – ${l.end_date} izinli)`);
+      }
+    }
+    if (conflicts.length) {
+      return { error: `⚠️ İzin çakışması — şu kişiler seçilen tarihlerde onaylı izinde: ${Array.from(new Set(conflicts)).join(', ')}. Bu kişileri çıkarın veya tarihleri değiştirin.` };
+    }
+  }
+
   const { error } = await supabase.from('shifts').insert(rows);
   if (error) return { error: error.message };
 

@@ -4,10 +4,12 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pin, PinOff, Trash2 } from 'lucide-react';
 import { deleteAnnouncement, togglePinAnnouncement } from '@/app/(app)/announcements/actions';
+import { useConfirm } from '@/components/ConfirmProvider';
 
 /** Pin/unpin + delete controls on an announcement card (managers/admins). */
 export default function AnnouncementActions({ id, pinned }: { id: string; pinned: boolean }) {
   const router = useRouter();
+  const confirmS = useConfirm();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -32,7 +34,7 @@ export default function AnnouncementActions({ id, pinned }: { id: string; pinned
       <button
         disabled={pending}
         title="Duyuruyu sil"
-        onClick={() => { if (window.confirm('Bu duyuru silinsin mi?')) run(() => deleteAnnouncement(id)); }}
+        onClick={async () => { if (await confirmS({ message: 'Bu duyuru silinsin mi?', danger: true })) run(() => deleteAnnouncement(id)); }}
         className="w-7 h-7 rounded-full bg-rose-500/15 text-rose-300 flex items-center justify-center hover:bg-rose-500/30 transition-colors"
       >
         <Trash2 size={13} />

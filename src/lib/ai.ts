@@ -86,6 +86,21 @@ export async function runAssistant(
       name: 'get_announcements',
       description: 'Şirketin son duyurularını (Pano) getirir.',
       input_schema: { type: 'object', properties: {} }
+    },
+    {
+      name: 'get_shifts',
+      description: 'Önümüzdeki 7 günün vardiya planını getirir (kullanıcının görebildikleri: kendi vardiyaları; yöneticiyse ekibinki de).',
+      input_schema: { type: 'object', properties: {} }
+    },
+    {
+      name: 'get_leaves',
+      description: 'İzin taleplerini getirir: bekleyenler ve önümüzdeki onaylı izinler (kullanıcının görebildiği kapsamda).',
+      input_schema: { type: 'object', properties: {} }
+    },
+    {
+      name: 'get_risky_tasks',
+      description: 'Gecikme riski taşıyan görevleri getirir: süresi geçmiş ve 24 saat içinde bitmesi gereken açık görevler.',
+      input_schema: { type: 'object', properties: {} }
     }
   ];
   if (isManager) {
@@ -126,6 +141,44 @@ export async function runAssistant(
           .from('announcements').select('title, body, is_pinned, created_at')
           .order('created_at', { ascending: false }).limit(10);
         return JSON.stringify(data ?? []);
+      }
+      if (name === 'get_shifts') {
+        const until = new Date(Date.now() + 7 * 86400000).toISOString();
+        const { data } = await sb
+          .from('shifts')
+          .select('starts_at, ends_at, note, profiles:user_id(full_name)')
+          .gte('starts_at', new Date().toISOString()).lt('starts_at', until)
+          .order('starts_at').limit(60);
+        return JSON.stringify((data ?? []).map((s: any) => ({
+          kisi: s.profiles?.full_name, baslangic: s.starts_at, bitis: s.ends_at, not: s.note
+        })));
+      }
+      if (name === 'get_leaves') {
+        const today = new Date().toISOString().slice(0, 10);
+        const [{ data: pending }, { data: upcoming }] = await Promise.all([
+          sb.from('leave_requests')
+            .select('type, start_date, end_date, status, profiles:user_id(full_name)')
+            .eq('status', 'pending').limit(20),
+          sb.from('leave_requests')
+            .select('type, start_date, end_date, status, profiles:user_id(full_name)')
+            .eq('status', 'approved').gte('end_date', today).limit(20)
+        ]);
+        const fmt = (l: any) => ({ kisi: l.profiles?.full_name, tur: l.type, baslangic: l.start_date, bitis: l.end_date });
+        return JSON.stringify({ bekleyen: (pending ?? []).map(fmt), yaklasan_onayli: (upcoming ?? []).map(fmt) });
+      }
+      if (name === 'get_risky_tasks') {
+        const in24h = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+        const { data } = await sb
+          .from('tasks')
+          .select('title, status, due_at, priority, task_assignees(profiles:user_id(full_name))')
+          .not('status', 'in', '("completed","cancelled")')
+          .not('due_at', 'is', null)
+          .lt('due_at', in24h)
+          .order('due_at').limit(30);
+        return JSON.stringify((data ?? []).map((t: any) => ({
+          gorev: t.title, durum: t.status, bitis: t.due_at, oncelik: t.priority,
+          atananlar: (t.task_assignees ?? []).map((a: any) => a.profiles?.full_name).filter(Boolean)
+        })));
       }
       if (name === 'get_team_stats' && isManager) {
         const since = new Date(Date.now() - 30 * 86400000).toISOString();
@@ -224,7 +277,7 @@ export async function draftTaskFromText(instruction: string, peopleNames: string
       nowInfo(),
       `Şirketteki kişiler: ${peopleNames.join(', ') || '(bilinmiyor)'}.`,
       `Departmanlar: ${departmentNames.join(', ') || '(bilinmiyor)'}.`,
-      'Tarihleri Europe/Istanbul saatine göre "YYYY-MM-DDTHH:mm" formatında ver ("yarın 08:00" gibi ifadeleri hesapla).',
+      'Tarihleri Europe/Istanbul saatine göre "YYYY-MM-DDTHH:mm" formatında ver ("yarın 08:00" gibi ifadeleri hesapla). Metinde tarih/saat İPUCU YOKSA due_at alanını tamamen boş bırak — tarih uydurma.',
       'Metinde madde madde iş sayılıyorsa type=checklist yap ve items doldur. Fotoğraf/kanıt isteniyorsa requires_photo=true. Kontrol/onay isteniyorsa requires_approval=true.',
       'assignee_names alanına yalnızca verilen kişi listesinden isimler yaz; kişi belirtilmemişse boş bırak. Tüm metinler Türkçe olsun.'
     ].join('\n'),
@@ -244,9 +297,29 @@ export async function draftTaskFromText(instruction: string, peopleNames: string
         assignee_names: { type: 'array', items: { type: 'string' } },
         department_name: { type: 'string' }
       },
-      required: ['title', 'type', 'due_at', 'priority']
+      required: ['title', 'type'] // tarih/öncelik zorunlu değil — model uydurmasın
     }
   });
+}
+
+// ============================================================
+// RISK ALERT — daily delay-risk narrative for managers (cron)
+// ============================================================
+export async function writeRiskSummary(companyName: string, risks: any[]) {
+  const client = new Anthropic();
+  const resp = await client.messages.create({
+    model: MODEL,
+    max_tokens: 400,
+    system: [
+      `"${companyName}" şirketi için günlük gecikme riski uyarısı yazıyorsun (yöneticiler okuyacak).`,
+      nowInfo(),
+      'Verilen görev listesine dayan; uydurma. En kritik 3-5 maddeyi vurgula: kim, hangi görev, ne kadar gecikmiş/ne zamana kadar.',
+      'Türkçe, kısa ve eyleme dönük yaz (en fazla 120 kelime). Markdown başlık kullanma.'
+    ].join('\n'),
+    messages: [{ role: 'user', content: JSON.stringify(risks) }]
+  });
+  const text = resp.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
+  return { text, inputTokens: resp.usage?.input_tokens ?? 0, outputTokens: resp.usage?.output_tokens ?? 0 };
 }
 
 export async function draftTemplateFromText(instruction: string) {

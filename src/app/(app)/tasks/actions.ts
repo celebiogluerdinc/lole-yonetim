@@ -394,7 +394,8 @@ export async function updateTask(formData: FormData) {
     requires_photo: z.boolean(),
     requires_approval: z.boolean(),
     assignees: z.array(z.string().uuid()).min(1),
-    new_items: z.array(z.string().min(1).max(300)).default([])
+    new_items: z.array(z.string().min(1).max(300)).default([]),
+    apply_series: z.boolean()
   });
   const parsed = schema.safeParse({
     task_id: String(formData.get('task_id') ?? ''),
@@ -405,7 +406,8 @@ export async function updateTask(formData: FormData) {
     requires_photo: formData.get('requires_photo') === 'on',
     requires_approval: formData.get('requires_approval') === 'on',
     assignees: formData.getAll('assignees').map(String),
-    new_items: formData.getAll('new_items').map(String).map(s => s.trim()).filter(Boolean)
+    new_items: formData.getAll('new_items').map(String).map(s => s.trim()).filter(Boolean),
+    apply_series: formData.get('apply_series') === 'on'
   });
   if (!parsed.success) {
     return { error: 'Başlık, bitiş tarihi ve en az bir atanan kişi zorunludur.' };
@@ -482,10 +484,111 @@ export async function updateTask(formData: FormData) {
     }).catch(() => {});
   }
 
+  // "Serinin kalanına da uygula": başlık/açıklama/öncelik/gereksinimler + atananlar,
+  // gelecekteki açık tekrarlara da işlenir (tarihler DEĞİŞMEZ — her tekrar kendi günü)
+  let seriesUpdated = 0;
+  if (i.apply_series && (task.recurrence_rule || task.parent_recurring_id)) {
+    const rootId = task.parent_recurring_id ?? task.id;
+    const { data: siblings } = await supabase.from('tasks')
+      .select('id')
+      .or(`id.eq.${rootId},parent_recurring_id.eq.${rootId}`)
+      .neq('id', i.task_id)
+      .in('status', ['open', 'in_progress', 'blocked'])
+      .gte('due_at', new Date().toISOString());
+    const sibIds = (siblings ?? []).map((s: any) => s.id);
+    if (sibIds.length) {
+      await supabase.from('tasks').update({
+        title: i.title,
+        description: i.description || null,
+        priority: i.priority,
+        requires_photo: i.requires_photo,
+        requires_approval: i.requires_approval
+      }).in('id', sibIds);
+      // atananları eşitle
+      await supabase.from('task_assignees').delete().in('task_id', sibIds);
+      await supabase.from('task_assignees').insert(
+        sibIds.flatMap((tid: string) => i.assignees.map(uid => ({ task_id: tid, user_id: uid })))
+      );
+      seriesUpdated = sibIds.length;
+    }
+  }
+
   revalidatePath(`/tasks/${i.task_id}`);
   revalidatePath('/manage/tasks');
   revalidatePath('/home');
+  return { ok: true, seriesUpdated };
+}
+
+/** Atanan kişi göreve "Başla" der — durum in_progress olur. */
+export async function startTask(taskId: string) {
+  if (!z.string().uuid().safeParse(taskId).success) return { error: 'Geçersiz görev.' };
+  const { supabase, profile } = await getCtx();
+  const { data: task } = await supabase.from('tasks').select('id, status, company_id, title').eq('id', taskId).maybeSingle();
+  if (!task) return { error: 'Görev bulunamadı.' };
+  if (task.status !== 'open') return { error: 'Görev zaten başlamış veya kapatılmış.' };
+
+  const { data, error } = await supabase.from('tasks')
+    .update({ status: 'in_progress' })
+    .eq('id', taskId).eq('status', 'open').select('id');
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Görev güncellenemedi.' };
+
+  await log(supabase, task.company_id, profile.id, 'task', taskId, 'started');
+  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath('/home');
   return { ok: true };
+}
+
+/** Personel erteleme talep eder — yöneticilere bildirim gider (görev değişmez). */
+export async function requestPostpone(taskId: string, reason: string) {
+  const parsed = z.string().min(3).max(500).safeParse(reason.trim());
+  if (!parsed.success) return { error: 'Lütfen erteleme sebebini kısaca yazın.' };
+  const { supabase, profile } = await getCtx();
+  const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).maybeSingle();
+  if (!task) return { error: 'Görev bulunamadı.' };
+  if (['completed', 'cancelled'].includes(task.status)) return { error: 'Kapatılmış görev için erteleme istenemez.' };
+
+  await Promise.all([
+    log(supabase, task.company_id, profile.id, 'task', taskId, 'postpone_requested', { reason: parsed.data }),
+    notifyManagers(supabase, task, 'custom', {
+      task_id: taskId,
+      title: `⏰ Erteleme talebi: ${task.title}`,
+      body: `${profile.full_name}: ${parsed.data}`,
+      url: `/tasks/${taskId}`
+    })
+  ]);
+  revalidatePath(`/tasks/${taskId}`);
+  return { ok: true };
+}
+
+/** Tekrarlayan serinin KALAN (bugünden sonraki, açık) görevlerini iptal eder. */
+export async function cancelTaskSeries(taskId: string) {
+  if (!z.string().uuid().safeParse(taskId).success) return { error: 'Geçersiz görev.' };
+  const { supabase, profile, managedDepartmentIds } = await getCtx();
+  const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).maybeSingle();
+  if (!task) return { error: 'Görev bulunamadı.' };
+
+  const allowed =
+    ['super_admin', 'admin'].includes(profile.role) ||
+    (task.department_id && managedDepartmentIds.includes(task.department_id));
+  if (!allowed) return { error: 'Bu seri üzerinde yetkiniz yok.' };
+
+  const rootId = task.parent_recurring_id ?? task.id;
+  const { data: cancelled, error } = await supabase.from('tasks')
+    .update({ status: 'cancelled' })
+    .or(`id.eq.${rootId},parent_recurring_id.eq.${rootId}`)
+    .in('status', ['open', 'in_progress', 'blocked'])
+    .gte('due_at', new Date().toISOString())
+    .select('id');
+  if (error) return { error: error.message };
+  if (!cancelled?.length) return { error: 'İptal edilecek gelecek tekrar bulunamadı (geçmiş/kapanmış olanlar korunur).' };
+
+  await log(supabase, task.company_id, profile.id, 'task', rootId, 'series_cancelled',
+    { count: cancelled.length, title: task.title });
+  revalidatePath('/manage/tasks');
+  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath('/home');
+  return { ok: true, count: cancelled.length };
 }
 
 /** Manager removes a checklist item from a task. */

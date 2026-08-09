@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Download, Upload, Building2, Type } from 'lucide-react';
 import { setAppName, renameCompany, restoreBackup } from '@/app/(app)/admin/actions';
+import { useConfirm } from '@/components/ConfirmProvider';
 
 export default function SettingsForms({
   isSuper, appName, companies
@@ -11,6 +12,7 @@ export default function SettingsForms({
   const [msg, setMsg] = useState<{ ok?: string; err?: string } | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
+  const confirmS = useConfirm();
 
   const run = (fn: () => Promise<any>, okText: string) => start(async () => {
     setMsg(null);
@@ -73,10 +75,10 @@ export default function SettingsForms({
 
           <div className="border-t border-white/[0.08] pt-4">
             <form
-              action={(fd) => {
+              action={async (fd) => {
                 const f = fd.get('file') as File | null;
                 if (!f || f.size === 0) { setMsg({ err: 'Önce bir yedek dosyası seçin.' }); return; }
-                if (!window.confirm('Yedek geri yüklenecek: dosyadaki kayıtlar mevcut verilerin ÜZERİNE yazılır. Devam edilsin mi?')) return;
+                if (!(await confirmS({ message: 'Yedek geri yüklenecek: dosyadaki kayıtlar mevcut verilerin ÜZERİNE yazılır. Devam edilsin mi?', danger: true }))) return;
                 run(() => restoreBackup(fd), 'Yedek başarıyla geri yüklendi.');
               }}
               className="flex flex-col sm:flex-row gap-3 sm:items-center"

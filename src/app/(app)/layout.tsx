@@ -3,6 +3,7 @@ import { logout } from '@/app/login/actions';
 import { ROLE_LABEL } from '@/lib/utils';
 import NavLink, { type IconName } from '@/components/NavLink';
 import MobileMenu from '@/components/MobileMenu';
+import { ConfirmProvider } from '@/components/ConfirmProvider';
 import Link from 'next/link';
 import { LogOut } from 'lucide-react';
 
@@ -87,6 +88,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ] as const).filter(n => n.show) as unknown as { href: string; label: string; icon: IconName; show: boolean; badge: number }[];
 
   return (
+    <ConfirmProvider>
     <div className="min-h-dvh flex">
       {/* Sidebar — desktop (macOS Reminders style) */}
       <aside className="hidden md:flex w-60 flex-col border-r border-white/[0.08] bg-[#141416] p-4 sticky top-0 h-dvh overflow-y-auto overscroll-contain
@@ -143,5 +145,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         />
       </nav>
     </div>
+    </ConfirmProvider>
   );
 }

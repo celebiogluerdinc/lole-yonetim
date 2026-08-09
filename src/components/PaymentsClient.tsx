@@ -11,6 +11,7 @@ import {
   completePaymentRequest, deletePaymentTemplate
 } from '@/app/(app)/payments/actions';
 import PrintButton, { type PrintTable } from '@/components/PrintButton';
+import { useConfirm } from '@/components/ConfirmProvider';
 
 interface Req {
   id: string; workTitle: string; workDetail: string | null; firm: string;
@@ -45,6 +46,7 @@ export default function PaymentsClient({
   meId: string; isAdmin: boolean; isDecider: boolean;
 }) {
   const router = useRouter();
+  const confirmS = useConfirm();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -315,7 +317,7 @@ export default function PaymentsClient({
                         )}
                         {r.status === 'pending' && r.requesterId === meId && (
                           <button disabled={pending}
-                            onClick={() => { if (window.confirm('Talebiniz iptal edilsin mi?')) run(() => cancelPaymentRequest(r.id)); }}
+                            onClick={async () => { if (await confirmS({ message: 'Talebiniz iptal edilsin mi?', danger: true })) run(() => cancelPaymentRequest(r.id)); }}
                             className="btn-outline text-sm !text-rose-300">
                             <Ban size={14} /> Talebi İptal Et
                           </button>
@@ -374,7 +376,7 @@ export default function PaymentsClient({
                     </Link>
                     {(isAdmin || t.creatorId === meId) && (
                       <button
-                        onClick={() => { if (window.confirm(`"${t.name}" şablonu silinsin mi?`)) run(() => deletePaymentTemplate(t.id)); }}
+                        onClick={async () => { if (await confirmS({ message: `"${t.name}" şablonu silinsin mi?`, danger: true })) run(() => deletePaymentTemplate(t.id)); }}
                         className="w-8 h-8 rounded-full bg-rose-500/15 text-rose-300 flex items-center justify-center hover:bg-rose-500/30"
                         title="Şablonu sil">
                         <Trash2 size={14} />

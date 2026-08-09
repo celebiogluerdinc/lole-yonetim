@@ -7,10 +7,22 @@ import { CheckCircle2, Clock, AlertCircle, Inbox } from 'lucide-react';
 export const dynamic = 'force-dynamic';
 
 const PERIODS = [
+  { key: '1', label: 'Bugün' },
   { key: '7', label: 'Hafta' },
   { key: '30', label: 'Ay' },
+  { key: '90', label: 'Çeyrek' },
   { key: 'all', label: 'Tümü' }
 ] as const;
+
+/** milisaniyeyi insancıl süreye çevir: "2 gün", "3s 20dk", "45dk" */
+function fmtDur(ms: number): string {
+  if (!isFinite(ms) || ms <= 0) return '—';
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `${mins}dk`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `${hours}s ${mins % 60}dk`;
+  return `${Math.round(hours / 24)} gün`;
+}
 
 interface Bucket { total: number; onTime: number; late: number; missed: number; open: number; }
 const emptyBucket = (): Bucket => ({ total: 0, onTime: 0, late: 0, missed: 0, open: 0 });
@@ -61,7 +73,7 @@ export default async function PerformancePage({
   // ---- fetch tasks in scope (RLS already limits visibility; we filter further) ----
   let q = supabase
     .from('tasks')
-    .select('id, title, status, due_at, completed_at, department_id')
+    .select('id, title, status, due_at, completed_at, created_at, priority, department_id')
     .eq('company_id', companyId)
     .not('due_at', 'is', null);
   if (since) q = q.gte('due_at', since);
@@ -70,7 +82,7 @@ export default async function PerformancePage({
     ? await q
     : await supabase
         .from('task_assignees')
-        .select('tasks!inner(id, title, status, due_at, completed_at, department_id)')
+        .select('tasks!inner(id, title, status, due_at, completed_at, created_at, priority, department_id)')
         .eq('user_id', profile.id)
         .then(r => ({ data: (r.data ?? []).map((x: any) => x.tasks).filter((t: any) => t.due_at && (!since || t.due_at >= since)) }));
 
@@ -81,25 +93,70 @@ export default async function PerformancePage({
   const overall = emptyBucket();
   for (const t of tasks) add(overall, classify(t, now));
 
+  // ---- önceki dönem kıyası (aynı uzunlukta bir önceki pencere) ----
+  let prevRateVal: number | null = null;
+  if (since && isManager) {
+    const days = Number(period);
+    const prevSince = new Date(now - 2 * days * 86400000).toISOString();
+    let pq = supabase.from('tasks')
+      .select('status, due_at, completed_at')
+      .eq('company_id', companyId)
+      .not('due_at', 'is', null)
+      .gte('due_at', prevSince).lt('due_at', since);
+    if (!isAdmin) pq = pq.in('department_id', managedDepartmentIds);
+    const { data: prevTasks } = await pq;
+    const pb = emptyBucket();
+    for (const t of prevTasks ?? []) add(pb, classify(t, now));
+    prevRateVal = rate(pb);
+  }
+
+  // ---- ek KPI'lar: ortalama gecikme + ortalama tamamlama süresi + acil görev başarımı ----
+  const lateDone = tasks.filter(t => t.status === 'completed' && t.due_at && t.completed_at &&
+    new Date(t.completed_at) > new Date(t.due_at));
+  const avgDelay = lateDone.length
+    ? lateDone.reduce((a, t) => a + (new Date(t.completed_at).getTime() - new Date(t.due_at).getTime()), 0) / lateDone.length
+    : 0;
+  const doneAll = tasks.filter(t => t.status === 'completed' && t.completed_at && t.created_at);
+  const avgCompletion = doneAll.length
+    ? doneAll.reduce((a, t) => a + (new Date(t.completed_at).getTime() - new Date(t.created_at).getTime()), 0) / doneAll.length
+    : 0;
+  const urgentBucket = emptyBucket();
+  for (const t of tasks.filter(t => ['high', 'urgent'].includes(t.priority))) add(urgentBucket, classify(t, now));
+  const urgentRate = rate(urgentBucket);
+
   // ---- per person / per department (managers & admins) ----
-  let perPerson: { name: string; b: Bucket }[] = [];
+  let perPerson: { name: string; b: Bucket; leaveDays: number }[] = [];
   let perDept: { name: string; b: Bucket }[] = [];
   if (isManager && taskIds.length) {
-    const [{ data: asg }, { data: depts }] = await Promise.all([
+    const sinceDate = (since ?? new Date(now - 365 * 86400000).toISOString()).slice(0, 10);
+    const [{ data: asg }, { data: depts }, { data: leaves }] = await Promise.all([
       supabase
         .from('task_assignees')
         .select('task_id, user_id, profiles:user_id(full_name)')
         .in('task_id', taskIds),
-      supabase.from('departments').select('id, name').eq('company_id', companyId)
+      supabase.from('departments').select('id, name').eq('company_id', companyId),
+      // dönem içindeki onaylı izinler → adil performans okuması
+      supabase.from('leave_requests')
+        .select('user_id, start_date, end_date')
+        .eq('company_id', companyId).eq('status', 'approved')
+        .gte('end_date', sinceDate)
     ]);
-    const byUser: Record<string, { name: string; b: Bucket }> = {};
+    // kişi başına dönem içindeki izin günü sayısı
+    const leaveByUser: Record<string, number> = {};
+    const winStart = new Date(sinceDate + 'T00:00:00Z').getTime();
+    for (const l of leaves ?? []) {
+      const s = Math.max(new Date(l.start_date + 'T00:00:00Z').getTime(), winStart);
+      const e = Math.min(new Date(l.end_date + 'T00:00:00Z').getTime(), now);
+      if (e >= s) leaveByUser[l.user_id] = (leaveByUser[l.user_id] ?? 0) + Math.floor((e - s) / 86400000) + 1;
+    }
+    const byUser: Record<string, { name: string; b: Bucket; leaveDays: number }> = {};
     const taskMap: Record<string, any> = {};
     for (const t of tasks) taskMap[t.id] = t;
     for (const a of asg ?? []) {
       const t = taskMap[a.task_id];
       if (!t) continue;
       const name = (a as any).profiles?.full_name ?? 'Kullanıcı';
-      const u = (byUser[a.user_id] ??= { name, b: emptyBucket() });
+      const u = (byUser[a.user_id] ??= { name, b: emptyBucket(), leaveDays: leaveByUser[a.user_id] ?? 0 });
       add(u.b, classify(t, now));
     }
     perPerson = Object.values(byUser).sort((a, b) => (rate(b.b) ?? -1) - (rate(a.b) ?? -1));
@@ -160,10 +217,10 @@ export default async function PerformancePage({
     title: 'Performans Raporu',
     subtitle: `${periodLabel} · Zamanında tamamlama: ${overallRate === null ? '—' : `%${overallRate}`}`,
     landscape: false,
-    headers: ['Kişi', 'Görev', 'Zamanında', 'Geç', 'Kaçırılan', 'Bekleyen', 'Oran'],
+    headers: ['Kişi', 'Görev', 'Zamanında', 'Geç', 'Kaçırılan', 'Bekleyen', 'İzin (gün)', 'Oran'],
     rows: perPerson.map(p => [
       p.name, String(p.b.total), String(p.b.onTime), String(p.b.late),
-      String(p.b.missed), String(p.b.open),
+      String(p.b.missed), String(p.b.open), p.leaveDays ? String(p.leaveDays) : '—',
       rate(p.b) === null ? '—' : `%${rate(p.b)}`
     ])
   };
@@ -238,16 +295,42 @@ export default async function PerformancePage({
         ))}
       </div>
 
+      {/* Ek KPI'lar */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+        <div className="smart-card">
+          <p className="text-[20px] font-bold leading-tight">{fmtDur(avgDelay)}</p>
+          <p className="text-[12px] font-semibold text-[#8E8E93]">Ort. gecikme (geç kalanlarda)</p>
+        </div>
+        <div className="smart-card">
+          <p className="text-[20px] font-bold leading-tight">{fmtDur(avgCompletion)}</p>
+          <p className="text-[12px] font-semibold text-[#8E8E93]">Ort. tamamlama süresi</p>
+        </div>
+        <div className="smart-card col-span-2 sm:col-span-1">
+          <p className="text-[20px] font-bold leading-tight">
+            {urgentRate === null ? '—' : `%${urgentRate}`}
+            <span className="text-[12px] text-[#8E8E93] font-normal ml-1">({urgentBucket.total} görev)</span>
+          </p>
+          <p className="text-[12px] font-semibold text-[#8E8E93]">⚡ Acil & Yüksek öncelik başarımı</p>
+        </div>
+      </div>
+
       {/* Overall rate */}
       <section>
         <h2 className="section-title">Zamanında Tamamlama Oranı</h2>
         <div className="card p-5">
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-baseline gap-2 flex-wrap">
             <span className="text-[40px] font-bold leading-none">
               {overallRate === null ? '—' : `%${overallRate}`}
             </span>
+            {prevRateVal !== null && overallRate !== null && (
+              <span className={`text-[14px] font-semibold ${
+                overallRate >= prevRateVal ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {overallRate >= prevRateVal ? '▲' : '▼'} {Math.abs(overallRate - prevRateVal)} puan
+                <span className="text-[#8E8E93] font-normal"> (önceki dönem %{prevRateVal})</span>
+              </span>
+            )}
             <span className="text-[13px] text-[#8E8E93]">
-              {overall.total} görev · son {period === 'all' ? 'tüm zamanlar' : `${period} gün`}
+              {overall.total} görev · {period === 'all' ? 'tüm zamanlar' : period === '1' ? 'bugün' : `son ${period} gün`}
             </span>
           </div>
           <div className="mt-4"><StatusBar b={overall} /></div>
@@ -288,30 +371,56 @@ export default async function PerformancePage({
         </section>
       )}
 
-      {/* Per person */}
+      {/* Per person — çok kolonlu tablo */}
       {isManager && perPerson.length > 0 && (
         <section>
           <h2 className="section-title">Kişi Bazında Sıralama</h2>
-          <div className="card divide-y divide-white/[0.08] overflow-hidden">
-            {perPerson.map((p, idx) => {
-              const r = rate(p.b);
-              const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
-              return (
-                <div key={p.name} className="px-4 py-3">
-                  <div className="flex items-baseline justify-between gap-2 mb-1.5">
-                    <p className="text-[15px] font-medium truncate">
-                      {medal && <span className="mr-1">{medal}</span>}{p.name}
-                    </p>
-                    <p className="text-[14px] font-semibold shrink-0">
-                      {r === null ? <span className="text-[#AEAEB2]">—</span> : `%${r}`}
-                      <span className="text-[12px] text-[#8E8E93] font-normal ml-1.5">{p.b.total} görev</span>
-                    </p>
-                  </div>
-                  <StatusBar b={p.b} />
-                </div>
-              );
-            })}
+          <div className="card overflow-x-auto">
+            <table className="w-full border-collapse min-w-[640px] text-[13px]">
+              <thead>
+                <tr className="border-b border-white/[0.08] text-[11px] uppercase tracking-wide text-[#8E8E93]">
+                  <th className="text-left px-4 py-2.5 font-semibold">Kişi</th>
+                  <th className="text-center px-2 py-2.5 font-semibold">Görev</th>
+                  <th className="text-center px-2 py-2.5 font-semibold text-emerald-300">Zamanında</th>
+                  <th className="text-center px-2 py-2.5 font-semibold text-amber-300">Geç</th>
+                  <th className="text-center px-2 py-2.5 font-semibold text-rose-300">Kaçırılan</th>
+                  <th className="text-center px-2 py-2.5 font-semibold">Bekleyen</th>
+                  <th className="text-center px-2 py-2.5 font-semibold">🏖 İzin</th>
+                  <th className="text-right px-4 py-2.5 font-semibold">Oran</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.06]">
+                {perPerson.map((p, idx) => {
+                  const r = rate(p.b);
+                  const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
+                  return (
+                    <tr key={`${p.name}-${idx}`} className="hover:bg-white/[0.03]">
+                      <td className="px-4 py-2.5">
+                        <p className="font-medium truncate max-w-[180px]">
+                          {medal && <span className="mr-1">{medal}</span>}{p.name}
+                        </p>
+                        <div className="mt-1 max-w-[180px]"><StatusBar b={p.b} /></div>
+                      </td>
+                      <td className="text-center px-2 py-2.5 font-semibold">{p.b.total}</td>
+                      <td className="text-center px-2 py-2.5 text-emerald-300">{p.b.onTime}</td>
+                      <td className="text-center px-2 py-2.5 text-amber-300">{p.b.late}</td>
+                      <td className="text-center px-2 py-2.5 text-rose-300">{p.b.missed}</td>
+                      <td className="text-center px-2 py-2.5 text-[#8E8E93]">{p.b.open}</td>
+                      <td className="text-center px-2 py-2.5 text-[#8E8E93]">
+                        {p.leaveDays ? `${p.leaveDays}g` : '—'}
+                      </td>
+                      <td className="text-right px-4 py-2.5 font-bold text-[15px]">
+                        {r === null ? <span className="text-[#AEAEB2] font-normal">—</span> : `%${r}`}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
+          <p className="text-[11px] text-[#AEAEB2] mt-1.5 px-1">
+            🏖 İzin kolonu dönem içindeki onaylı izin günleridir — performansı değerlendirirken göz önünde bulundurun.
+          </p>
         </section>
       )}
 
@@ -320,14 +429,22 @@ export default async function PerformancePage({
         <section>
           <h2 className="section-title">Departman Bazında</h2>
           <div className="card divide-y divide-white/[0.08] overflow-hidden">
-            {perDept.map(d => {
+            {perDept.map((d, idx) => {
               const r = rate(d.b);
+              const delta = r !== null && overallRate !== null ? r - overallRate : null;
               return (
                 <div key={d.name} className="px-4 py-3">
                   <div className="flex items-baseline justify-between gap-2 mb-1.5">
-                    <p className="text-[15px] font-medium truncate">{d.name}</p>
+                    <p className="text-[15px] font-medium truncate">
+                      {idx === 0 && perDept.length > 1 ? '⭐ ' : ''}{d.name}
+                    </p>
                     <p className="text-[14px] font-semibold shrink-0">
                       {r === null ? <span className="text-[#AEAEB2]">—</span> : `%${r}`}
+                      {delta !== null && delta !== 0 && (
+                        <span className={`text-[12px] ml-1 ${delta > 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          ({delta > 0 ? '+' : ''}{delta})
+                        </span>
+                      )}
                       <span className="text-[12px] text-[#8E8E93] font-normal ml-1.5">{d.b.total} görev</span>
                     </p>
                   </div>
@@ -335,6 +452,11 @@ export default async function PerformancePage({
                 </div>
               );
             })}
+            {overallRate !== null && (
+              <p className="px-4 py-2 text-[11px] text-[#AEAEB2]">
+                Parantez içi değerler şirket ortalamasına (%{overallRate}) göre farktır; ⭐ en iyi departman.
+              </p>
+            )}
           </div>
         </section>
       )}

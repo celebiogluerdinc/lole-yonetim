@@ -7,6 +7,7 @@ import { Check, Camera, ChevronRight, ClipboardList, Flag, Repeat } from 'lucide
 import type { Task } from '@/lib/types';
 import { fmtDate, isOverdue, TZ, STATUS_LABEL, STATUS_COLOR } from '@/lib/utils';
 import { quickComplete } from '@/app/(app)/tasks/actions';
+import { useConfirm } from '@/components/ConfirmProvider';
 
 /** "Bugün" / "Yarın" / "12 Ağu Çar" — Istanbul takvimine göre */
 function dayInfo(iso: string | null) {
@@ -33,6 +34,7 @@ export default function TaskRow({
   progress?: { done: number; total: number };
 }) {
   const router = useRouter();
+  const confirmS = useConfirm();
   const [, start] = useTransition();
   const [localDone, setLocalDone] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -45,11 +47,11 @@ export default function TaskRow({
 
   const day = dayInfo(task.due_at);
 
-  function onTick() {
+  async function onTick() {
     if (done) return;
     // ileri tarihli görev yanlışlıkla kapatılmasın
     if (day && (day.kind === 'tomorrow' || day.kind === 'future')) {
-      if (!window.confirm(`Bu görev İLERİ TARİHLİ: ${day.label}.\nBugünün görevi değil — yine de tamamlansın mı?`)) return;
+      if (!(await confirmS({ message: `Bu görev İLERİ TARİHLİ: ${day.label}.\nBugünün görevi değil — yine de tamamlansın mı?`, okText: 'Onayla' }))) return;
     }
     if (needsDetail) {
       router.push(`/tasks/${task.id}`);

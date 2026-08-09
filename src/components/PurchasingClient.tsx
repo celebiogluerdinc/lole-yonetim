@@ -11,6 +11,7 @@ import {
   completePurchaseRequest, savePurchaseRequestAsTemplate, deletePurchaseTemplate
 } from '@/app/(app)/purchasing/actions';
 import PrintButton, { type PrintTable } from '@/components/PrintButton';
+import { useConfirm } from '@/components/ConfirmProvider';
 
 interface Item { product: string; quantity: string | null; unit: string | null; brand: string | null; spec: string | null; }
 interface Req {
@@ -50,6 +51,7 @@ export default function PurchasingClient({
   meId: string; isAdmin: boolean; isDecider: boolean;
 }) {
   const router = useRouter();
+  const confirmS = useConfirm();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -341,7 +343,7 @@ export default function PurchasingClient({
                         )}
                         {r.status === 'pending' && r.requesterId === meId && (
                           <button disabled={pending}
-                            onClick={() => { if (window.confirm('Talebiniz iptal edilsin mi?')) run(() => cancelPurchaseRequest(r.id)); }}
+                            onClick={async () => { if (await confirmS({ message: 'Talebiniz iptal edilsin mi?', danger: true })) run(() => cancelPurchaseRequest(r.id)); }}
                             className="btn-outline text-sm !text-rose-300">
                             <Ban size={14} /> Talebi İptal Et
                           </button>
@@ -404,7 +406,7 @@ export default function PurchasingClient({
                     </Link>
                     {(isAdmin || t.creatorId === meId) && (
                       <button
-                        onClick={() => { if (window.confirm(`"${t.name}" şablonu silinsin mi?`)) run(() => deletePurchaseTemplate(t.id)); }}
+                        onClick={async () => { if (await confirmS({ message: `"${t.name}" şablonu silinsin mi?`, danger: true })) run(() => deletePurchaseTemplate(t.id)); }}
                         className="w-8 h-8 rounded-full bg-rose-500/15 text-rose-300 flex items-center justify-center hover:bg-rose-500/30"
                         title="Şablonu sil">
                         <Trash2 size={14} />

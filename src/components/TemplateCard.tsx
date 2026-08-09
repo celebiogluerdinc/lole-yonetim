@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { CalendarPlus, ClipboardList, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { instantiateTemplate, deleteTemplate, updateTemplate } from '@/app/(app)/manage/actions';
+import { useConfirm } from '@/components/ConfirmProvider';
 import type { Template } from '@/lib/types';
 
 export default function TemplateCard({
@@ -15,6 +16,7 @@ export default function TemplateCard({
   departmentName?: string;
 }) {
   const router = useRouter();
+  const confirmS = useConfirm();
   const [open, setOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,8 +32,8 @@ export default function TemplateCard({
     setNewItemText('');
   }
 
-  function onDelete() {
-    if (!window.confirm(`"${template.name}" şablonu silinsin mi? (Oluşturulmuş görevler etkilenmez)`)) return;
+  async function onDelete() {
+    if (!(await confirmS({ message: `"${template.name}" şablonu silinsin mi? (Oluşturulmuş görevler etkilenmez)`, danger: true }))) return;
     start(async () => {
       setError(null);
       const r = await deleteTemplate(template.id);
@@ -132,7 +134,7 @@ export default function TemplateCard({
                 <div key={i} className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2">
                   <span className="flex-1 text-sm truncate">{t}</span>
                   <button type="button" onClick={() => setEditItems(a => a.filter((_, x) => x !== i))}
-                    className="w-6 h-6 rounded-full bg-rose-500/15 text-rose-300 flex items-center justify-center shrink-0">
+                    className="w-7 h-7 rounded-full bg-rose-500/15 text-rose-300 flex items-center justify-center shrink-0">
                     <X size={12} />
                   </button>
                 </div>

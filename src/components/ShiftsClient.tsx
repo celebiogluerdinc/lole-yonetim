@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Plus, Trash2, X, Repeat } from 'lucide-react';
 import { addShift, deleteShift, deleteShiftSeries } from '@/app/(app)/hr/actions';
 import PrintButton, { type PrintTable } from '@/components/PrintButton';
+import { useConfirm } from '@/components/ConfirmProvider';
 
 export interface ShiftRow {
   id: string; user_id: string; name: string; dept: string | null;
@@ -36,6 +37,7 @@ export default function ShiftsClient({
   isManager: boolean;
 }) {
   const router = useRouter();
+  const confirmS = useConfirm();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -59,9 +61,9 @@ export default function ShiftsClient({
     setHidden(h => new Set(h).add(s.id));
     run(() => deleteShift(s.id));
   }
-  function removeSeries(s: ShiftRow) {
+  async function removeSeries(s: ShiftRow) {
     if (!s.series_id) return;
-    if (!window.confirm('Bu tekrarlayan serinin TÜM vardiyaları silinsin mi?')) return;
+    if (!(await confirmS({ message: 'Bu tekrarlayan serinin TÜM vardiyaları silinsin mi?', danger: true }))) return;
     setHidden(h => {
       const n = new Set(h);
       shifts.filter(x => x.series_id === s.series_id).forEach(x => n.add(x.id));
