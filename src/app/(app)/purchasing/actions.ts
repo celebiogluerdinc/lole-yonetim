@@ -39,6 +39,21 @@ function isDecider(profile: any, managedDepartmentIds: string[]): boolean {
   return ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
 }
 
+/** Müdürler (admin değil) yalnızca KENDİ departman kapsamındaki talepleri sonuçlandırabilir. */
+async function managerInScope(
+  supabase: any, profile: any, managedDepartmentIds: string[],
+  req: { department_id: string | null; requester_id: string }
+): Promise<boolean> {
+  if (['super_admin', 'admin'].includes(profile.role)) return true;
+  if (req.department_id && managedDepartmentIds.includes(req.department_id)) return true;
+  const { data: shared } = await supabase.from('department_members')
+    .select('department_id')
+    .eq('user_id', req.requester_id)
+    .in('department_id', managedDepartmentIds)
+    .limit(1);
+  return !!shared?.length;
+}
+
 /** Create a purchase request (optionally also saving it as a template). */
 export async function createPurchaseRequest(formData: FormData) {
   let items: any;
@@ -137,6 +152,9 @@ export async function decidePurchaseRequest(id: string, approve: boolean, note?:
   if (req.requester_id === profile.id && profile.role !== 'super_admin') {
     return { error: 'Kendi talebinizi kendiniz onaylayamazsınız.' };
   }
+  if (!(await managerInScope(supabase, profile, managedDepartmentIds, req))) {
+    return { error: 'Bu talep yönettiğiniz departmanların kapsamında değil.' };
+  }
 
   const { error } = await supabase.from('purchase_requests').update({
     status: approve ? 'approved' : 'rejected',
@@ -173,6 +191,9 @@ export async function completePurchaseRequest(id: string) {
   const { data: req } = await supabase.from('purchase_requests').select('*').eq('id', id).maybeSingle();
   if (!req) return { error: 'Talep bulunamadı.' };
   if (req.status !== 'approved') return { error: 'Yalnızca onaylanmış talepler bitirilebilir.' };
+  if (!(await managerInScope(supabase, profile, managedDepartmentIds, req))) {
+    return { error: 'Bu talep yönettiğiniz departmanların kapsamında değil.' };
+  }
 
   const { error } = await supabase.from('purchase_requests')
     .update({ status: 'completed' }).eq('id', id).eq('status', 'approved');

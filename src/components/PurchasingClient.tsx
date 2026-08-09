@@ -322,7 +322,7 @@ export default function PurchasingClient({
                         {r.status === 'approved' && isDecider && (
                           <button disabled={pending}
                             onClick={() => run(() => completePurchaseRequest(r.id), 'İşlem bitirildi olarak işaretlendi.')}
-                            className="btn-primary !bg-blue-600 hover:!bg-blue-700 text-sm">
+                            className="btn-primary text-sm">
                             🏁 İşlem Bitirildi
                           </button>
                         )}
@@ -330,7 +330,7 @@ export default function PurchasingClient({
                           <>
                             <button disabled={pending}
                               onClick={() => run(() => decidePurchaseRequest(r.id, true), 'Talep onaylandı.')}
-                              className="btn-primary !bg-emerald-600 hover:!bg-emerald-700 text-sm">
+                              className="btn-success text-sm">
                               <ThumbsUp size={14} /> Onayla
                             </button>
                             <button disabled={pending} onClick={() => setRejectId(rejectId === r.id ? null : r.id)}

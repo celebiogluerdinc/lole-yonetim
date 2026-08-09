@@ -41,6 +41,12 @@ body {
   background: linear-gradient(180deg, #ff453a 0%, #d70015 100%);
   box-shadow: 0 4px 14px rgba(255, 69, 58, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
+.btn-success {
+  @apply btn text-white;
+  background: linear-gradient(180deg, #30d158 0%, #248a3d 100%);
+  box-shadow: 0 4px 14px rgba(48, 209, 88, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+.btn-success:hover { filter: brightness(1.08); }
 
 .input {
   @apply w-full rounded-xl px-3.5 py-2.5 text-[15px] outline-none border border-transparent transition-colors text-[#F2F2F7];

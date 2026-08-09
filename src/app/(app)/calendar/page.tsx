@@ -11,7 +11,7 @@ const LEAVE_TR: Record<string, string> = {
 
 export default async function CalendarPage({
   searchParams
-}: { searchParams: { m?: string; scope?: string; k?: string } }) {
+}: { searchParams: { m?: string; scope?: string; k?: string; d?: string } }) {
   const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
 
   const now = new Date();
@@ -73,8 +73,12 @@ export default async function CalendarPage({
     leaves = leaves.filter((l: any) => l.user_id === profile.id);
   }
 
-  const dayKey = (iso: string) => new Date(iso).toLocaleDateString('tr-TR', {
-    timeZone: TZ, day: 'numeric', month: 'long', weekday: 'long'
+  // günler ISO (YYYY-MM-DD, İstanbul) anahtarıyla gruplanır
+  const dayKey = (iso: string) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date(iso));
+  const labelOf = (isoDay: string) => new Date(`${isoDay}T12:00:00Z`).toLocaleDateString('tr-TR', {
+    timeZone: 'UTC', day: 'numeric', month: 'long', weekday: 'long'
   });
   const t = (iso: string) => new Date(iso).toLocaleTimeString('tr-TR', {
     timeZone: TZ, hour: '2-digit', minute: '2-digit'
@@ -108,6 +112,27 @@ export default async function CalendarPage({
     if (byDay[k].length === 0) delete byDay[k];
   }
 
+  // ---- AY IZGARASI verileri ----
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const firstOffset = (monthStart.getUTCDay() + 6) % 7; // Pzt=0
+  const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const isoOf = (dayNum: number) => `${y}-${pad(m)}-${pad(dayNum)}`;
+  const gridDots: Record<string, { t: boolean; s: boolean; l: boolean; n: number }> = {};
+  for (const [k, list] of Object.entries(byDay)) {
+    gridDots[k] = {
+      t: list.some(e => e.kind === 'task'),
+      s: list.some(e => e.kind === 'shift'),
+      l: list.some(e => e.kind === 'leave'),
+      n: list.length
+    };
+  }
+  // seçili gün (?d=) — geçerliyse yalnız o günün listesi gösterilir
+  const selDay = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.d ?? '') ? searchParams.d! : null;
+  const sortedDays = Object.keys(byDay).sort();
+  const visibleDays = selDay ? sortedDays.filter(k => k === selDay) : sortedDays;
+  const qs = (extra: string) => `/calendar?m=${y}-${m}&scope=${scope}&k=${kat}${extra}`;
+
   const monthLabel = monthStart.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const KAT_CHIPS = [
     ['all', `Tümü`, ''],
@@ -121,9 +146,11 @@ export default async function CalendarPage({
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-[28px] leading-tight font-bold tracking-tight">Takvim</h1>
         <div className="flex items-center gap-1">
-          <Link href={`/calendar?m=${prev}&scope=${scope}`} className="btn-ghost !px-2"><ChevronLeft size={18} /></Link>
+          <Link href={`/calendar?m=${todayIso.slice(0, 7)}&scope=${scope}&k=${kat}&d=${todayIso}#gunler`}
+            className="btn-ghost text-[13px] !px-2.5">Bugün</Link>
+          <Link href={`/calendar?m=${prev}&scope=${scope}&k=${kat}`} className="btn-ghost !px-2"><ChevronLeft size={18} /></Link>
           <span className="text-sm font-medium min-w-[130px] text-center capitalize">{monthLabel}</span>
-          <Link href={`/calendar?m=${next}&scope=${scope}`} className="btn-ghost !px-2"><ChevronRight size={18} /></Link>
+          <Link href={`/calendar?m=${next}&scope=${scope}&k=${kat}`} className="btn-ghost !px-2"><ChevronRight size={18} /></Link>
         </div>
       </div>
 
@@ -143,7 +170,7 @@ export default async function CalendarPage({
       {/* kategori filtresi */}
       <div className="flex gap-1.5 mb-5 overflow-x-auto -mx-1 px-1 pb-1">
         {KAT_CHIPS.map(([k, l, color]) => (
-          <Link key={k} href={`/calendar?m=${y}-${m}&scope=${scope}&k=${k}`}
+          <Link key={k} href={`/calendar?m=${y}-${m}&scope=${scope}&k=${k}${selDay ? `&d=${selDay}` : ''}`}
             className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
               kat === k ? 'text-white' : 'bg-[#1C1C1E] text-[#D1D1D6]'}`}
             style={kat === k ? { backgroundColor: color || '#5856D6' } : undefined}>
@@ -152,16 +179,66 @@ export default async function CalendarPage({
         ))}
       </div>
 
-      {Object.keys(byDay).length === 0 && (
-        <div className="card p-10 text-center text-sm text-[#8E8E93]">
-          Bu ay planlanmış görev, vardiya veya izin yok.
+      {/* ---- AY IZGARASI ---- */}
+      <div className="card p-3 mb-5">
+        <div className="grid grid-cols-7 gap-1 mb-1">
+          {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map(d => (
+            <div key={d} className="text-center text-[11px] font-semibold text-[#8E8E93] uppercase py-1">{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {Array.from({ length: firstOffset }).map((_, i) => <div key={`e${i}`} />)}
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const dayNum = i + 1;
+            const iso = isoOf(dayNum);
+            const dots = gridDots[iso];
+            const isToday = iso === todayIso;
+            const isSel = iso === selDay;
+            return (
+              <Link
+                key={iso}
+                href={`${qs(isSel ? '' : `&d=${iso}`)}${isSel ? '' : '#gunler'}`}
+                title={dots ? `${dots.n} kayıt` : undefined}
+                className={`relative aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 text-[13px] transition-colors ${
+                  isSel ? `bg-ios-blue text-white font-bold${isToday ? ' ring-2 ring-white/40' : ''}`
+                  : isToday ? 'bg-ios-blue/15 text-ios-blue font-bold'
+                  : dots ? 'bg-white/[0.05] hover:bg-white/[0.10]'
+                  : 'text-[#8E8E93] hover:bg-white/[0.05]'
+                }`}
+              >
+                {dayNum}
+                {dots && (
+                  <span className="flex gap-[3px]">
+                    {dots.t && <i className="w-1.5 h-1.5 rounded-full" style={{ background: isSel ? '#fff' : '#0A84FF' }} />}
+                    {dots.s && <i className="w-1.5 h-1.5 rounded-full" style={{ background: isSel ? '#fff' : '#FF9F0A' }} />}
+                    {dots.l && <i className="w-1.5 h-1.5 rounded-full" style={{ background: isSel ? '#fff' : '#30B0C7' }} />}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+
+      {selDay && (
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[14px] font-semibold capitalize">📍 {labelOf(selDay)}</p>
+          <Link href={qs('')} className="text-[13px] text-ios-blue font-medium">Tüm ayı göster</Link>
         </div>
       )}
 
-      <div className="space-y-5">
-        {Object.entries(byDay).map(([day, list]) => (
-          <section key={day}>
-            <h2 className="text-sm font-semibold text-[#8E8E93] mb-2 capitalize">{day}</h2>
+      {visibleDays.length === 0 && (
+        <div className="card p-10 text-center text-sm text-[#8E8E93]">
+          {selDay ? 'Seçili günde kayıt yok.' : 'Bu ay planlanmış görev, vardiya veya izin yok.'}
+        </div>
+      )}
+
+      <div className="space-y-5" id="gunler">
+        {visibleDays.map(dayIso => {
+          const list = byDay[dayIso];
+          return (
+          <section key={dayIso}>
+            <h2 className="text-sm font-semibold text-[#8E8E93] mb-2 capitalize">{labelOf(dayIso)}</h2>
             <div className="card divide-y divide-white/[0.08]">
               {list.map((e, i) => {
                 if (e.kind === 'task') {
@@ -209,7 +286,8 @@ export default async function CalendarPage({
               })}
             </div>
           </section>
-        ))}
+          );
+        })}
       </div>
     </main>
   );

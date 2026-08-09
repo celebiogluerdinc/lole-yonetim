@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCtx } from '@/lib/auth';
+import PrintButton from '@/components/PrintButton';
 import { CheckCircle2, Clock, AlertCircle, Inbox } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -118,6 +119,55 @@ export default async function PerformancePage({
 
   const overallRate = rate(overall);
 
+  // ---- 8 haftalık eğilim (tamamlanan görevler / hafta) ----
+  let trend: { label: string; done: number; late: number }[] = [];
+  if (isManager) {
+    const eightWeeksAgo = new Date(now - 8 * 7 * 86400000).toISOString();
+    let tq = supabase.from('tasks')
+      .select('completed_at, due_at')
+      .eq('company_id', companyId)
+      .eq('status', 'completed')
+      .gte('completed_at', eightWeeksAgo);
+    if (!isAdmin) tq = tq.in('department_id', managedDepartmentIds);
+    const { data: doneTasks } = await tq;
+    const weeks: { start: Date; done: number; late: number }[] = [];
+    const monday = (d: Date) => {
+      const x = new Date(d);
+      x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
+      x.setUTCHours(0, 0, 0, 0);
+      return x;
+    };
+    const w0 = monday(new Date(now - 7 * 7 * 86400000));
+    for (let i = 0; i < 8; i++) weeks.push({ start: new Date(w0.getTime() + i * 7 * 86400000), done: 0, late: 0 });
+    for (const t of doneTasks ?? []) {
+      const ts = new Date(t.completed_at).getTime();
+      const idx = Math.floor((ts - w0.getTime()) / (7 * 86400000));
+      if (idx >= 0 && idx < 8) {
+        weeks[idx].done++;
+        if (t.due_at && ts > new Date(t.due_at).getTime()) weeks[idx].late++;
+      }
+    }
+    trend = weeks.map(w => ({
+      label: w.start.toLocaleDateString('tr-TR', { timeZone: 'UTC', day: 'numeric', month: 'short' }),
+      done: w.done, late: w.late
+    }));
+  }
+  const trendMax = Math.max(1, ...trend.map(t => t.done));
+
+  // ---- PDF tablo verisi ----
+  const periodLabel = period === 'all' ? 'Tüm zamanlar' : `Son ${period} gün`;
+  const printTable = {
+    title: 'Performans Raporu',
+    subtitle: `${periodLabel} · Zamanında tamamlama: ${overallRate === null ? '—' : `%${overallRate}`}`,
+    landscape: false,
+    headers: ['Kişi', 'Görev', 'Zamanında', 'Geç', 'Kaçırılan', 'Bekleyen', 'Oran'],
+    rows: perPerson.map(p => [
+      p.name, String(p.b.total), String(p.b.onTime), String(p.b.late),
+      String(p.b.missed), String(p.b.open),
+      rate(p.b) === null ? '—' : `%${rate(p.b)}`
+    ])
+  };
+
   // latest weekly AI report (RLS: managers & admins only)
   let aiReport: { content: string; week_start: string } | null = null;
   if (isManager) {
@@ -147,13 +197,16 @@ export default async function PerformancePage({
             {isAdmin ? 'Tüm şirket' : isManager ? 'Departmanlarınız' : 'Kişisel performansınız'}
           </p>
         </div>
-        <div className="segment !w-auto shrink-0">
-          {PERIODS.map(p => (
-            <Link key={p.key} href={`/performance?p=${p.key}`}
-              className={`segment-item !px-4 ${period === p.key ? 'segment-item-active' : ''}`}>
-              {p.label}
-            </Link>
-          ))}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="segment !w-auto">
+            {PERIODS.map(p => (
+              <Link key={p.key} href={`/performance?p=${p.key}`}
+                className={`segment-item !px-4 ${period === p.key ? 'segment-item-active' : ''}`}>
+                {p.label}
+              </Link>
+            ))}
+          </div>
+          {isManager && perPerson.length > 0 && <PrintButton table={printTable} label="PDF" />}
         </div>
       </header>
 
@@ -207,17 +260,48 @@ export default async function PerformancePage({
         </div>
       </section>
 
+      {/* 8 haftalık eğilim */}
+      {isManager && trend.some(t => t.done > 0) && (
+        <section>
+          <h2 className="section-title">Haftalık Eğilim — tamamlanan görevler</h2>
+          <div className="card p-5">
+            <div className="flex items-end gap-2 h-32">
+              {trend.map((w, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+                  <span className="text-[11px] text-[#D1D1D6] font-semibold">{w.done || ''}</span>
+                  <div className="w-full max-w-[34px] rounded-t-md overflow-hidden flex flex-col justify-end"
+                    style={{ height: `${(w.done / trendMax) * 100}%`, minHeight: w.done ? 6 : 2 }}>
+                    {w.late > 0 && (
+                      <div style={{ height: `${(w.late / Math.max(w.done, 1)) * 100}%`, backgroundColor: '#FF9500' }} />
+                    )}
+                    <div className="flex-1" style={{ backgroundColor: w.done ? '#34C759' : 'rgba(255,255,255,0.10)' }} />
+                  </div>
+                  <span className="text-[10px] text-[#8E8E93] truncate w-full text-center">{w.label}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-[#8E8E93] mt-3">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style={{ background: '#34C759' }} /> zamanında ·{' '}
+              <span className="inline-block w-2.5 h-2.5 rounded-sm align-middle mr-1" style={{ background: '#FF9500' }} /> geç tamamlanan
+            </p>
+          </div>
+        </section>
+      )}
+
       {/* Per person */}
       {isManager && perPerson.length > 0 && (
         <section>
-          <h2 className="section-title">Kişi Bazında</h2>
+          <h2 className="section-title">Kişi Bazında Sıralama</h2>
           <div className="card divide-y divide-white/[0.08] overflow-hidden">
-            {perPerson.map(p => {
+            {perPerson.map((p, idx) => {
               const r = rate(p.b);
+              const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
               return (
                 <div key={p.name} className="px-4 py-3">
                   <div className="flex items-baseline justify-between gap-2 mb-1.5">
-                    <p className="text-[15px] font-medium truncate">{p.name}</p>
+                    <p className="text-[15px] font-medium truncate">
+                      {medal && <span className="mr-1">{medal}</span>}{p.name}
+                    </p>
                     <p className="text-[14px] font-semibold shrink-0">
                       {r === null ? <span className="text-[#AEAEB2]">—</span> : `%${r}`}
                       <span className="text-[12px] text-[#8E8E93] font-normal ml-1.5">{p.b.total} görev</span>

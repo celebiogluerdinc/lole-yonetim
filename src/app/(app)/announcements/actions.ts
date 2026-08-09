@@ -113,6 +113,59 @@ export async function togglePinAnnouncement(id: string, pinned: boolean) {
   return { ok: true };
 }
 
+/** Add a comment under an announcement (visible to everyone who sees it). */
+export async function addAnnouncementComment(formData: FormData) {
+  const annId = String(formData.get('announcement_id') ?? '');
+  const body = z.string().min(1).max(1000).safeParse(String(formData.get('body') ?? '').trim());
+  if (!z.string().uuid().safeParse(annId).success) return { error: 'Geçersiz duyuru.' };
+  if (!body.success) return { error: 'Yorum boş olamaz (en fazla 1000 karakter).' };
+
+  const { supabase, profile, companyId } = await getCtx();
+  const { data: ann } = await supabase.from('announcements')
+    .select('id, company_id, author_id, title').eq('id', annId).maybeSingle();
+  if (!ann) return { error: 'Duyuru bulunamadı.' };
+
+  const { error } = await supabase.from('announcement_comments').insert({
+    announcement_id: annId, company_id: ann.company_id,
+    author_id: profile.id, body: body.data
+  });
+  if (error) return { error: error.message };
+
+  // duyuru sahibine haber ver
+  if (ann.author_id && ann.author_id !== profile.id) {
+    await supabase.from('notifications').insert({
+      company_id: ann.company_id, user_id: ann.author_id, type: 'custom',
+      payload: {
+        title: '💬 Duyurunuza yorum yapıldı',
+        body: `${profile.full_name}: ${body.data.slice(0, 80)}`,
+        url: '/announcements'
+      }
+    });
+    pushToUsers([ann.author_id], {
+      title: '💬 Duyurunuza yorum yapıldı',
+      body: `${profile.full_name}: ${body.data.slice(0, 80)}`,
+      url: '/announcements'
+    }).catch(() => {});
+  }
+
+  revalidatePath('/announcements');
+  return { ok: true };
+}
+
+/** Delete an announcement comment (author or admin). */
+export async function deleteAnnouncementComment(id: string) {
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Geçersiz yorum.' };
+  const { supabase, profile } = await getCtx();
+  const isAdmin = ['super_admin', 'admin'].includes(profile.role);
+  let q = supabase.from('announcement_comments').delete().eq('id', id);
+  if (!isAdmin) q = q.eq('author_id', profile.id);
+  const { data, error } = await q.select('id');
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Yalnızca kendi yorumunuzu silebilirsiniz.' };
+  revalidatePath('/announcements');
+  return { ok: true };
+}
+
 export async function markAnnouncementsRead(ids: string[]) {
   if (!ids.length) return { ok: true };
   const { supabase, profile } = await getCtx();

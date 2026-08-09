@@ -12,13 +12,27 @@ import {
 import { saveTaskAsTemplate } from '@/app/(app)/manage/actions';
 
 interface Att { id: string; file_name: string; mime_type: string | null; url?: string; created_at: string; checklist_item_id: string | null; ai_verdict?: string | null; ai_note?: string | null; }
-interface NoteT { id: string; body: string; created_at: string; profiles?: { full_name: string } | null; }
+interface NoteT { id: string; author_id?: string; body: string; created_at: string; profiles?: { full_name: string } | null; }
+
+const TZ = 'Europe/Istanbul';
+function dueDayInfo(iso: string | null) {
+  if (!iso) return null;
+  const key = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d);
+  const k = key(new Date(iso));
+  const today = key(new Date());
+  if (k === today) return { future: false, label: 'Bugün' };
+  if (k < today) return { future: false, label: null };
+  const label = new Date(iso).toLocaleDateString('tr-TR', {
+    timeZone: TZ, day: 'numeric', month: 'long', weekday: 'long'
+  });
+  return { future: true, label };
+}
 
 export default function TaskDetailClient({
-  task, items, attachments, notes, isAssignee, canReview
+  task, items, attachments, notes, isAssignee, canReview, meId
 }: {
   task: Task; items: ChecklistItem[]; attachments: Att[]; notes: NoteT[];
-  isAssignee: boolean; canReview: boolean;
+  isAssignee: boolean; canReview: boolean; meId?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -41,9 +55,15 @@ export default function TaskDetailClient({
   const finished = ['completed', 'cancelled'].includes(task.status);
   const inReview = task.status === 'pending_review';
   const allItemsDone = items.length === 0 || items.every(i => itemDone(i));
+  const dueInfo = dueDayInfo(task.due_at);
+
+  const confirmFuture = () =>
+    !dueInfo?.future ||
+    window.confirm(`Bu görev İLERİ TARİHLİ: ${dueInfo.label}.\nBugünün görevi değil — yine de tamamlansın mı?`);
 
   function onToggleItem(item: ChecklistItem) {
     const next = !itemDone(item);
+    if (next && !confirmFuture()) return; // ileri tarihli görevin maddesi onaysız işaretlenmesin
     setItemOverride(o => ({ ...o, [item.id]: next })); // instant
     start(async () => {
       const r = await toggleChecklistItem(item.id, next);
@@ -72,6 +92,14 @@ export default function TaskDetailClient({
       {error && (
         <div className="rounded-xl bg-rose-500/10 border border-rose-500/30 px-4 py-3 text-sm text-rose-300">
           {error}
+        </div>
+      )}
+
+      {/* ileri tarihli görev uyarı afişi — yanlış günün görevi yapılmasın */}
+      {dueInfo?.future && !finished && (
+        <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 px-4 py-3 text-sm text-amber-300">
+          📅 <b>Bu görev ileri tarihli:</b> {dueInfo.label}. Bugünün görevi değil —
+          bugünün görevlerini Ana Sayfa &gt; &quot;Bugün&quot; sekmesinde bulabilirsiniz.
         </div>
       )}
 
@@ -206,18 +234,29 @@ export default function TaskDetailClient({
         )}
       </section>
 
-      {/* Notes */}
+      {/* Görev içi sohbet / notlar */}
       <section className="card p-4">
-        <h2 className="font-semibold text-sm text-[#D1D1D6] mb-3">Notlar</h2>
-        <ul className="space-y-2 mb-3">
-          {notes.map(n => (
-            <li key={n.id} className="rounded-xl bg-[#1C1C1E]/[0.06] px-3 py-2">
-              <p className="text-sm whitespace-pre-wrap">{n.body}</p>
-              <p className="text-[11px] text-[#AEAEB2] mt-0.5">
-                {n.profiles?.full_name} · {fmtDate(n.created_at)}
-              </p>
-            </li>
-          ))}
+        <h2 className="font-semibold text-sm text-[#D1D1D6] mb-3">💬 Görev Sohbeti</h2>
+        {notes.length === 0 && (
+          <p className="text-[13px] text-[#8E8E93] mb-3">
+            Henüz mesaj yok — görevle ilgili soru ve notlarınızı buraya yazın, görevi görebilen herkes okur.
+          </p>
+        )}
+        <ul className="space-y-1.5 mb-3">
+          {notes.map(n => {
+            const mine = !!meId && n.author_id === meId;
+            return (
+              <li key={n.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] rounded-2xl px-3 py-2 ${
+                  mine ? 'bg-ios-blue/20 rounded-br-[6px]' : 'bg-white/[0.06] rounded-bl-[6px]'}`}>
+                  <p className="text-sm whitespace-pre-wrap break-words">{n.body}</p>
+                  <p className="text-[11px] text-[#AEAEB2] mt-0.5">
+                    {mine ? 'Siz' : n.profiles?.full_name} · {fmtDate(n.created_at)}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
         </ul>
         <form
           ref={noteRef}
@@ -231,7 +270,7 @@ export default function TaskDetailClient({
           }}
           className="flex gap-2"
         >
-          <input name="body" required placeholder="Not ekle…" className="input" />
+          <input name="body" required placeholder="Mesaj yazın…" className="input" />
           <button className="btn-primary shrink-0" disabled={pending}><Send size={15} /></button>
         </form>
       </section>
@@ -241,7 +280,7 @@ export default function TaskDetailClient({
         <div className="flex flex-col sm:flex-row gap-2">
           <button
             disabled={pending || (task.type === 'checklist' && !allItemsDone)}
-            onClick={() => run(() => completeTask(task.id))}
+            onClick={() => { if (confirmFuture()) run(() => completeTask(task.id, dueInfo?.future === true)); }}
             className="btn-primary flex-1 !py-3"
           >
             <Check size={17} strokeWidth={3} />
@@ -281,7 +320,7 @@ export default function TaskDetailClient({
           <p className="text-sm font-medium text-amber-200">Bu görev onayınızı bekliyor.</p>
           <div className="flex gap-2">
             <button disabled={pending} onClick={() => run(() => reviewTask(task.id, true))}
-              className="btn-primary flex-1 !bg-emerald-600 hover:!bg-emerald-700">
+              className="btn-success flex-1">
               <ThumbsUp size={15} /> Onayla
             </button>
             <button disabled={pending} onClick={() => setRejectOpen(v => !v)}

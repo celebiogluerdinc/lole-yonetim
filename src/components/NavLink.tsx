@@ -50,8 +50,8 @@ function Badge({ n, mobile }: { n: number; mobile?: boolean }) {
 }
 
 export default function NavLink({
-  href, label, icon, mobile = false, badge = 0
-}: { href: string; label: string; icon: IconName; mobile?: boolean; badge?: number }) {
+  href, label, icon, mobile = false, badge = 0, short
+}: { href: string; label: string; icon: IconName; mobile?: boolean; badge?: number; short?: string }) {
   const pathname = usePathname();
   const active = pathname === href || (href !== '/home' && pathname.startsWith(href));
   const { Icon, color } = META[icon] ?? META.home;
@@ -65,7 +65,7 @@ export default function NavLink({
           <Icon size={22} strokeWidth={active ? 2.2 : 1.8} />
           <Badge n={badge} mobile />
         </span>
-        {label.split(' ')[0]}
+        {short ?? label}
       </Link>
     );
   }
@@ -73,7 +73,7 @@ export default function NavLink({
   return (
     <Link href={href}
       className={`flex items-center gap-3 rounded-xl px-2.5 py-2 text-[15px] transition-colors ${
-        active ? 'bg-[#2C2C2E] text-white shadow-sm font-semibold' : 'text-[#D1D1D6] hover:bg-[#1C1C1E]/10'}`}>
+        active ? 'bg-[#2C2C2E] text-white shadow-sm font-semibold' : 'text-[#D1D1D6] hover:bg-white/[0.07]'}`}>
       <span className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0"
         style={{ backgroundColor: color }}>
         <Icon size={16} strokeWidth={2.2} />

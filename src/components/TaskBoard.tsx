@@ -21,6 +21,7 @@ interface Row {
 
 const FILTERS = [
   { key: 'active', label: 'Aktif', color: '#007AFF' },
+  { key: 'today', label: 'Bugün', color: '#34C759' },
   { key: 'open', label: 'Açık', color: '#8E8E93' },
   { key: 'in_progress', label: 'Devam Eden', color: '#007AFF' },
   { key: 'pending_review', label: 'Onay Bekleyen', color: '#FF9500' },
@@ -31,7 +32,7 @@ const FILTERS = [
 ] as const;
 
 const BADGE: Record<string, { label: string; cls: string }> = {
-  open: { label: 'Açık', cls: 'bg-[#1C1C1E]/10 text-[#D1D1D6]' },
+  open: { label: 'Açık', cls: 'bg-white/[0.07] text-[#D1D1D6]' },
   in_progress: { label: 'Devam ediyor', cls: 'bg-blue-500/20 text-blue-300' },
   pending_review: { label: 'Onay bekliyor', cls: 'bg-amber-500/20 text-amber-300' },
   completed: { label: 'Tamamlandı', cls: 'bg-emerald-500/20 text-emerald-300' },
@@ -45,6 +46,12 @@ function eff(r: Row): string {
   if (['completed', 'cancelled', 'blocked', 'pending_review'].includes(r.status)) return r.status;
   if (r.due_at && new Date(r.due_at).getTime() < Date.now()) return 'overdue';
   return r.status;
+}
+
+const istDayKey = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d);
+/** Bugünün görevi mi? (İstanbul takvimi) */
+function isTodayRow(r: Row): boolean {
+  return !!r.due_at && istDayKey(new Date(r.due_at)) === istDayKey(new Date());
 }
 
 const tr = (s: string) => s.toLocaleLowerCase('tr-TR');
@@ -81,11 +88,14 @@ export default function TaskBoard({
   const effRow = (r: Row) => override[r.id] || eff(r);
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: rows.length, active: 0 };
+    const c: Record<string, number> = { all: rows.length, active: 0, today: 0 };
     for (const r of rows) {
       const e = effRow(r);
       c[e] = (c[e] ?? 0) + 1;
-      if (!['completed', 'cancelled'].includes(e)) c.active++;
+      if (!['completed', 'cancelled'].includes(e)) {
+        c.active++;
+        if (isTodayRow(r)) c.today++;
+      }
     }
     return c;
   }, [rows, override]);
@@ -93,7 +103,8 @@ export default function TaskBoard({
   const filtered = useMemo(() => rows.filter(r => {
     const e = effRow(r);
     if (filter === 'active' && ['completed', 'cancelled'].includes(e)) return false;
-    if (!['active', 'all'].includes(filter) && e !== filter) return false;
+    if (filter === 'today' && (['completed', 'cancelled'].includes(e) || !isTodayRow(r))) return false;
+    if (!['active', 'all', 'today'].includes(filter) && e !== filter) return false;
     if (dept && r.department_id !== dept) return false;
     if (q) {
       const hay = tr(r.title + ' ' + r.assignees.join(' ') + ' ' + (r.department ?? ''));
@@ -234,7 +245,7 @@ export default function TaskBoard({
                 <span className="flex gap-1 shrink-0" onClick={ev => { ev.preventDefault(); ev.stopPropagation(); }}>
                   <button
                     title="Görevi bitir"
-                    onClick={() => quickSet(r.id, 'completed')}
+                    onClick={() => { if (window.confirm(`"${r.title}" tamamlandı olarak işaretlensin mi?`)) quickSet(r.id, 'completed'); }}
                     className="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-300 flex items-center justify-center hover:bg-emerald-500/30 active:scale-90 transition-all"
                   >
                     <CheckCheck size={15} />

@@ -118,7 +118,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </div>
           </Link>
           <form action={logout}>
-            <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-[#8E8E93] hover:bg-[#1C1C1E]/10 transition-colors">
+            <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-[#8E8E93] hover:bg-white/[0.07] transition-colors">
               <LogOut size={16} /> Çıkış yap
             </button>
           </form>
@@ -133,7 +133,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {/* Bottom bar — mobile: 4 quick tabs + full menu sheet */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#1C1C1E]/85 backdrop-blur-xl border-t border-white/[0.10] flex justify-around py-1.5 z-40 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {nav.slice(0, 4).map(n => (
-          <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} mobile />
+          <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} mobile
+            short={({ 'Ana Sayfa': 'Anasayfa', 'Lole Asistan': 'Asistan', 'Bildirimler': 'Bildirim', 'Ödeme Talepleri': 'Ödeme', 'Satın Alma': 'Satın Al' } as Record<string, string>)[n.label] ?? n.label} />
         ))}
         <MobileMenu
           items={nav.map(({ href, label, icon, badge }) => ({ href, label, icon, badge }))}

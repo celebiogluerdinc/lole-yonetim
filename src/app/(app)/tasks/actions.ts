@@ -43,8 +43,15 @@ async function notifyManagers(supabase: any, task: any, type: string, payload: a
   }).catch(() => {});
 }
 
+/** İstanbul takvimine göre görev ileri tarihli mi? (yanlış günün görevi kilidi) */
+function isFutureDay(dueAt: string | null): boolean {
+  if (!dueAt) return false;
+  const key = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(d);
+  return key(new Date(dueAt)) > key(new Date());
+}
+
 /** One-tap complete from lists. Optimized: task + photo check in one parallel round. */
-export async function quickComplete(taskId: string) {
+export async function quickComplete(taskId: string, force = false) {
   const { supabase, profile } = await getCtx();
 
   const [{ data: task }, { count: myPhotos }] = await Promise.all([
@@ -54,6 +61,7 @@ export async function quickComplete(taskId: string) {
   ]);
   if (!task) return { error: 'Görev bulunamadı veya erişiminiz yok.' };
   if (['completed', 'cancelled'].includes(task.status)) return { ok: true };
+  if (!force && isFutureDay(task.due_at)) return { error: 'future_task' }; // sunucu tarafı yanlış-gün kilidi
   if (task.requires_photo && !(myPhotos ?? 0)) return { error: 'photo_required' };
 
   const nextStatus = task.requires_approval ? 'pending_review' : 'completed';
@@ -80,6 +88,9 @@ export async function toggleChecklistItem(itemId: string, done: boolean) {
   const { data: item } = await supabase
     .from('checklist_items').select('*, tasks(id, status)').eq('id', itemId).maybeSingle();
   if (!item) return { error: 'Madde bulunamadı.' };
+  if (['completed', 'cancelled'].includes(item.tasks?.status ?? '')) {
+    return { error: 'Bu görev kapatılmış — maddeleri artık değiştirilemez.' };
+  }
 
   if (done && item.requires_photo) {
     const { count } = await supabase
@@ -98,15 +109,16 @@ export async function toggleChecklistItem(itemId: string, done: boolean) {
   if (done && item.tasks?.status === 'open') {
     updates.push(supabase.from('tasks').update({ status: 'in_progress' }).eq('id', item.task_id));
   }
-  const [{ error }] = await Promise.all(updates);
-  if (error) return { error: error.message };
+  const results = await Promise.all(updates);
+  const failed = results.find((r: any) => r?.error);
+  if (failed?.error) return { error: failed.error.message };
 
   revalidatePath(`/tasks/${item.task_id}`);
   revalidatePath('/home');
   return { ok: true };
 }
 
-export async function completeTask(taskId: string) {
+export async function completeTask(taskId: string, force = false) {
   const { supabase, profile } = await getCtx();
 
   const [{ data: task }, { count: notDone }, { count: myPhotos }] = await Promise.all([
@@ -117,6 +129,7 @@ export async function completeTask(taskId: string) {
       .eq('task_id', taskId).eq('uploaded_by', profile.id)
   ]);
   if (!task) return { error: 'Görev bulunamadı veya erişiminiz yok.' };
+  if (!force && isFutureDay(task.due_at)) return { error: 'future_task' }; // sunucu tarafı yanlış-gün kilidi
 
   if (task.type === 'checklist' && (notDone ?? 0) > 0) {
     return { error: 'Önce tüm maddeleri tamamlayın.' };
@@ -202,10 +215,13 @@ export async function blockTask(taskId: string, reason: string) {
   const { supabase, profile } = await getCtx();
   const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).maybeSingle();
   if (!task) return { error: 'Görev bulunamadı veya erişiminiz yok.' };
+  if (['completed', 'cancelled'].includes(task.status)) {
+    return { error: 'Kapatılmış görev için engel bildirilemez.' };
+  }
 
   const { error } = await supabase.from('tasks').update({
     status: 'blocked', blocked_reason: parsed.data
-  }).eq('id', taskId);
+  }).eq('id', taskId).in('status', ['open', 'in_progress', 'pending_review']);
   if (error) return { error: error.message };
 
   await Promise.all([
@@ -284,7 +300,9 @@ export async function uploadAttachment(formData: FormData) {
   if (!file || !z.string().uuid().safeParse(taskId).success) return { error: 'Dosya seçilmedi.' };
   if (itemId && !z.string().uuid().safeParse(itemId).success) return { error: 'Geçersiz madde.' };
   if (file.size > 10 * 1024 * 1024) return { error: 'Dosya 10MB sınırını aşıyor.' };
-  if (file.type && !ALLOWED_MIME.has(file.type)) {
+  const extGuess = (file.name.split('.').pop() || '').toLowerCase();
+  const ALLOWED_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'gif', 'pdf']);
+  if (file.type ? !ALLOWED_MIME.has(file.type) : !ALLOWED_EXT.has(extGuess)) {
     return { error: 'Yalnızca fotoğraf (JPG/PNG/HEIC/WebP) ve PDF yüklenebilir.' };
   }
 
@@ -319,7 +337,7 @@ export async function uploadAttachment(formData: FormData) {
   // Fotoğraf Denetçisi (vision) — best-effort, never blocks the upload result
   if (
     task.requires_photo &&
-    file.type?.startsWith('image/') &&
+    ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) && // HEIC vision desteklemiyor — sessizce atla
     file.size < 3_500_000 &&
     process.env.ANTHROPIC_API_KEY
   ) {

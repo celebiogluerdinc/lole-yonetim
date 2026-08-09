@@ -27,7 +27,7 @@ export default function NewChat({ people }: { people: Person[] }) {
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 pt-4 pb-2">
               <h2 className="text-[17px] font-bold">Yeni Sohbet</h2>
-              <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-full bg-[#1C1C1E]/10 flex items-center justify-center text-[#8E8E93]">
+              <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-full bg-white/[0.07] flex items-center justify-center text-[#8E8E93]">
                 <X size={16} />
               </button>
             </div>

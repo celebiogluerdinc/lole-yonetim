@@ -3,6 +3,7 @@ import { getCtx } from '@/lib/auth';
 import { fmtDate, TZ, STATUS_LABEL, STATUS_COLOR, PRIORITY_LABEL, PRIORITY_COLOR } from '@/lib/utils';
 import TaskDetailClient from '@/components/TaskDetailClient';
 import TaskEdit from '@/components/TaskEdit';
+import TaskMessageButton from '@/components/TaskMessageButton';
 import { Camera, Repeat, ShieldCheck } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +14,7 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
   const { data: task } = await supabase.from('tasks').select('*').eq('id', params.id).maybeSingle();
   if (!task) notFound();
 
-  const [{ data: items }, { data: attachments }, { data: notes }, { data: assignees }, { data: dept }] =
+  const [{ data: items }, { data: attachments }, { data: notes }, { data: assignees }, { data: dept }, { data: creator }] =
     await Promise.all([
       supabase.from('checklist_items').select('*').eq('task_id', task.id).order('position'),
       supabase.from('attachments').select('*').eq('task_id', task.id).order('created_at'),
@@ -21,6 +22,9 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
       supabase.from('task_assignees').select('user_id, profiles:user_id(full_name)').eq('task_id', task.id),
       task.department_id
         ? supabase.from('departments').select('name').eq('id', task.department_id).maybeSingle()
+        : Promise.resolve({ data: null } as any),
+      task.created_by
+        ? supabase.from('profiles').select('id, full_name').eq('id', task.created_by).maybeSingle()
         : Promise.resolve({ data: null } as any)
     ]);
 
@@ -86,8 +90,23 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
         {(assignees ?? []).length > 0 && (
           <p className="text-xs text-[#AEAEB2] mt-3">
             Atanan: {(assignees ?? []).map((a: any) => a.profiles?.full_name).filter(Boolean).join(', ')}
+            {creator?.full_name ? ` · Veren: ${creator.full_name}` : ''}
           </p>
         )}
+
+        {/* görev katılımcılarıyla direkt mesajlaşma */}
+        <div className="mt-3">
+          <TaskMessageButton
+            people={[
+              ...(creator && creator.id !== profile.id
+                ? [{ id: creator.id, name: creator.full_name ?? 'Görev sahibi', tag: 'Görevi veren' }]
+                : []),
+              ...(assignees ?? [])
+                .filter((a: any) => a.user_id !== profile.id && a.user_id !== creator?.id)
+                .map((a: any) => ({ id: a.user_id, name: a.profiles?.full_name ?? 'Personel', tag: 'Atanan' }))
+            ]}
+          />
+        </div>
 
         {task.status === 'blocked' && task.blocked_reason && (
           <div className="mt-3 rounded-xl bg-rose-500/10 border border-rose-500/30 px-3 py-2 text-sm text-rose-300">
@@ -118,6 +137,7 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
         notes={(notes ?? []) as any}
         isAssignee={isAssignee}
         canReview={!!canReview}
+        meId={profile.id}
       />
     </main>
   );

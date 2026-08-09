@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { fmtDate } from '@/lib/utils';
 import AnnouncementComposer from '@/components/AnnouncementComposer';
 import AnnouncementActions from '@/components/AnnouncementActions';
+import AnnouncementComments, { type AnnComment } from '@/components/AnnouncementComments';
 import MarkRead from '@/components/MarkRead';
 import { Pin } from 'lucide-react';
 
@@ -14,14 +15,22 @@ export default async function AnnouncementsPage() {
 
   const canPost = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
 
-  const [{ data: anns }, { data: myReads }, { data: depts }] = await Promise.all([
+  const [{ data: anns }, { data: myReads }, { data: depts }, { data: allComments }] = await Promise.all([
     supabase.from('announcements').select('*, profiles:author_id(full_name)')
       .eq('company_id', companyId)
       .order('is_pinned', { ascending: false })
       .order('created_at', { ascending: false }),
     supabase.from('announcement_reads').select('announcement_id').eq('user_id', profile.id),
-    supabase.from('departments').select('id, name').eq('company_id', companyId)
+    supabase.from('departments').select('id, name').eq('company_id', companyId),
+    supabase.from('announcement_comments')
+      .select('*, profiles:author_id(full_name)')
+      .eq('company_id', companyId)
+      .order('created_at')
+      .limit(500)
   ]);
+
+  const commentsByAnn: Record<string, AnnComment[]> = {};
+  for (const c of allComments ?? []) (commentsByAnn[c.announcement_id] ??= []).push(c as any);
 
   const readSet = new Set((myReads ?? []).map((r: any) => r.announcement_id));
   const deptName: Record<string, string> = {};
@@ -92,6 +101,12 @@ export default async function AnnouncementsPage() {
                 </>
               )}
             </div>
+            <AnnouncementComments
+              annId={a.id}
+              comments={commentsByAnn[a.id] ?? []}
+              meId={profile.id}
+              isAdmin={['super_admin', 'admin'].includes(profile.role)}
+            />
           </article>
         ))}
       </div>

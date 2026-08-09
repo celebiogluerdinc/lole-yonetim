@@ -37,13 +37,15 @@ export async function askAssistant(question: string) {
     thread_id: thread!.id, role: 'user', content: q.data
   });
 
-  const { data: hist } = await ctx.supabase
+  // SON 24 mesajı al (en yeniler) — eski uç kesilirse güncel soru daima dahil kalır
+  const { data: histDesc } = await ctx.supabase
     .from('ai_messages')
     .select('role, content')
     .eq('thread_id', thread!.id)
     .in('role', ['user', 'assistant'])
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(24);
+  const hist = (histDesc ?? []).reverse();
 
   try {
     const res = await runAssistant(ctx, (hist ?? []) as any);
@@ -118,6 +120,9 @@ export async function aiDraftTemplate(instruction: string) {
   if (!q.success) return { error: 'Lütfen şablonu kısaca tarif edin.' };
 
   const ctx = await getCtx();
+  if (!['super_admin', 'admin'].includes(ctx.profile.role) && ctx.managedDepartmentIds.length === 0) {
+    return { error: 'Bu özellik yöneticiler içindir.' };
+  }
   const blocked = await checkAllowance(ctx.companyId, 'checklist_generator');
   if (blocked) return { error: blocked };
 
@@ -137,7 +142,11 @@ export async function aiDraftTemplate(instruction: string) {
 
 /** Workload Balancer — suggests who to assign a task to (advice only). */
 export async function aiSuggestAssignees(departmentId: string, taskSummary: string) {
+  if (!z.string().uuid().safeParse(departmentId).success) return { error: 'Önce bir departman seçin.' };
   const ctx = await getCtx();
+  if (!['super_admin', 'admin'].includes(ctx.profile.role) && !ctx.managedDepartmentIds.includes(departmentId)) {
+    return { error: 'Bu özellik yöneticiler içindir.' };
+  }
   const blocked = await checkAllowance(ctx.companyId, 'workload_balancer');
   if (blocked) return { error: blocked };
 
@@ -191,6 +200,9 @@ export async function aiDraftAnnouncement(rough: string) {
   if (!q.success) return { error: 'Önce birkaç kelime karalayın.' };
 
   const ctx = await getCtx();
+  if (!['super_admin', 'admin'].includes(ctx.profile.role) && ctx.managedDepartmentIds.length === 0) {
+    return { error: 'Bu özellik yöneticiler içindir.' };
+  }
   const blocked = await checkAllowance(ctx.companyId, 'announcement_writer');
   if (blocked) return { error: blocked };
 

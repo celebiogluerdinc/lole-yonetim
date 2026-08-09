@@ -227,13 +227,14 @@ export async function decideLeave(id: string, approve: boolean, note?: string) {
     if (!shared?.length) return { error: 'Bu kişi yönettiğiniz departmanlarda değil.' };
   }
 
-  const { error } = await supabase.from('leave_requests').update({
+  const { data: updated, error } = await supabase.from('leave_requests').update({
     status: approve ? 'approved' : 'rejected',
     decided_by: profile.id,
     decided_at: new Date().toISOString(),
-    decision_note: note?.trim() || null
-  }).eq('id', id);
+    decision_note: note?.trim().slice(0, 500) || null
+  }).eq('id', id).eq('status', 'pending').select('id'); // yarış koruması: yalnız bekleyen talep
   if (error) return { error: error.message };
+  if (!updated?.length) return { error: 'Bu talep az önce başka biri tarafından sonuçlandırıldı.' };
 
   await notify(supabase, req.company_id, [req.user_id],
     approve ? '✅ İzin talebiniz onaylandı' : '❌ İzin talebiniz reddedildi',

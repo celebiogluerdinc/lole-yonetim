@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
-import { Check, Camera, ChevronRight, ClipboardList, Flag } from 'lucide-react';
+import { Check, Camera, ChevronRight, ClipboardList, Flag, Repeat } from 'lucide-react';
 import type { Task } from '@/lib/types';
 import { fmtDate, isOverdue, TZ, STATUS_LABEL, STATUS_COLOR } from '@/lib/utils';
 import { quickComplete } from '@/app/(app)/tasks/actions';
@@ -56,10 +56,11 @@ export default function TaskRow({
       return;
     }
     // optimistic: fill the circle INSTANTLY, sync with the server in the background
+    const forceFuture = !!day && (day.kind === 'tomorrow' || day.kind === 'future');
     setLocalDone(true);
     setFailed(false);
     start(async () => {
-      const r = await quickComplete(task.id);
+      const r = await quickComplete(task.id, forceFuture);
       if (r?.error) {
         setLocalDone(false);
         setFailed(true);
@@ -90,6 +91,9 @@ export default function TaskRow({
           </p>
           {task.requires_photo && <Camera size={13} className="text-[#8E8E93] shrink-0" />}
           {isChecklist && <ClipboardList size={13} className="text-[#8E8E93] shrink-0" />}
+          {(task as any).recurrence_rule && (
+            <Repeat size={12} className="text-ios-blue shrink-0" aria-label="Tekrarlayan görev" />
+          )}
         </div>
         <div className="flex items-center gap-1.5 mt-1 text-[13px] flex-wrap">
           {day && (

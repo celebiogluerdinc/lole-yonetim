@@ -5,6 +5,21 @@ import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
 import { pushToUsers } from '@/lib/push';
 
+/** Müdürler (admin değil) yalnızca KENDİ departman kapsamındaki talepleri sonuçlandırabilir. */
+async function managerInScope(
+  supabase: any, profile: any, managedDepartmentIds: string[],
+  req: { department_id: string | null; requester_id: string }
+): Promise<boolean> {
+  if (['super_admin', 'admin'].includes(profile.role)) return true;
+  if (req.department_id && managedDepartmentIds.includes(req.department_id)) return true;
+  const { data: shared } = await supabase.from('department_members')
+    .select('department_id')
+    .eq('user_id', req.requester_id)
+    .in('department_id', managedDepartmentIds)
+    .limit(1);
+  return !!shared?.length;
+}
+
 async function notifyDeciders(supabase: any, companyId: string, exceptId: string, title: string, body: string, url: string) {
   const [adminsRes, mgrsRes] = await Promise.all([
     supabase.from('profiles').select('id').eq('company_id', companyId).eq('role', 'admin'),
@@ -26,11 +41,26 @@ async function notifyDeciders(supabase: any, companyId: string, exceptId: string
   pushToUsers(ids, { title, body, url }).catch(() => {});
 }
 
-/** "12.500,50" / "12500.50" → 12500.50 */
+/** "12.500,50" / "12500.50" / "1,500.75" → doğru sayı (son ayırıcı ondalıktır). */
 function parseAmount(raw: string): number | null {
-  const t = raw.trim();
+  const t = raw.trim().replace(/[^\d.,]/g, '');
   if (!t) return null;
-  const normalized = t.replace(/\./g, '').replace(',', '.').replace(/[^\d.]/g, '');
+  const lastDot = t.lastIndexOf('.');
+  const lastComma = t.lastIndexOf(',');
+  const sepIdx = Math.max(lastDot, lastComma);
+  let normalized: string;
+  if (sepIdx === -1) {
+    normalized = t;
+  } else {
+    const decimals = t.slice(sepIdx + 1);
+    if (decimals.length >= 1 && decimals.length <= 2) {
+      // son ayırıcı ondalık: "12.500,50" → 12500.50 · "12500.50" → 12500.50
+      normalized = t.slice(0, sepIdx).replace(/[.,]/g, '') + '.' + decimals;
+    } else {
+      // ayırıcılar binlik: "12.500" → 12500
+      normalized = t.replace(/[.,]/g, '');
+    }
+  }
   const n = Number(normalized);
   return isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
 }
@@ -139,6 +169,9 @@ export async function decidePaymentRequest(id: string, approve: boolean, note?: 
   if (req.requester_id === profile.id && profile.role !== 'super_admin') {
     return { error: 'Kendi ödeme talebinizi kendiniz onaylayamazsınız.' };
   }
+  if (!(await managerInScope(supabase, profile, managedDepartmentIds, req))) {
+    return { error: 'Bu talep yönettiğiniz departmanların kapsamında değil.' };
+  }
 
   const { error } = await supabase.from('payment_requests').update({
     status: approve ? 'approved' : 'rejected',
@@ -175,6 +208,9 @@ export async function completePaymentRequest(id: string) {
   const { data: req } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
   if (!req) return { error: 'Talep bulunamadı.' };
   if (req.status !== 'approved') return { error: 'Yalnızca onaylanmış talepler bitirilebilir.' };
+  if (!(await managerInScope(supabase, profile, managedDepartmentIds, req))) {
+    return { error: 'Bu talep yönettiğiniz departmanların kapsamında değil.' };
+  }
 
   const { error } = await supabase.from('payment_requests')
     .update({ status: 'completed' }).eq('id', id).eq('status', 'approved');
