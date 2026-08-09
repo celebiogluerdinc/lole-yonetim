@@ -5,8 +5,26 @@ import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { Check, Camera, ChevronRight, ClipboardList, Flag } from 'lucide-react';
 import type { Task } from '@/lib/types';
-import { fmtDate, isOverdue, STATUS_LABEL, STATUS_COLOR } from '@/lib/utils';
+import { fmtDate, isOverdue, TZ, STATUS_LABEL, STATUS_COLOR } from '@/lib/utils';
 import { quickComplete } from '@/app/(app)/tasks/actions';
+
+/** "Bugün" / "Yarın" / "12 Ağu Çar" — Istanbul takvimine göre */
+function dayInfo(iso: string | null) {
+  if (!iso) return null;
+  const key = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d);
+  const d = new Date(iso);
+  const today = key(new Date());
+  const tomorrow = key(new Date(Date.now() + 86400000));
+  const k = key(d);
+  const hhmm = d.toLocaleTimeString('tr-TR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+  if (k === today) return { kind: 'today' as const, label: `Bugün ${hhmm}` };
+  if (k < today) return { kind: 'past' as const, label: fmtDate(iso) };
+  if (k === tomorrow) return { kind: 'tomorrow' as const, label: `Yarın ${hhmm}` };
+  return {
+    kind: 'future' as const,
+    label: d.toLocaleDateString('tr-TR', { timeZone: TZ, day: 'numeric', month: 'short', weekday: 'short' }) + ` ${hhmm}`
+  };
+}
 
 export default function TaskRow({
   task, progress
@@ -25,8 +43,14 @@ export default function TaskRow({
   const needsDetail = isChecklist || task.requires_photo;
   const flagged = ['high', 'urgent'].includes(task.priority);
 
+  const day = dayInfo(task.due_at);
+
   function onTick() {
     if (done) return;
+    // ileri tarihli görev yanlışlıkla kapatılmasın
+    if (day && (day.kind === 'tomorrow' || day.kind === 'future')) {
+      if (!window.confirm(`Bu görev İLERİ TARİHLİ: ${day.label}.\nBugünün görevi değil — yine de tamamlansın mı?`)) return;
+    }
     if (needsDetail) {
       router.push(`/tasks/${task.id}`);
       return;
@@ -67,10 +91,20 @@ export default function TaskRow({
           {task.requires_photo && <Camera size={13} className="text-[#8E8E93] shrink-0" />}
           {isChecklist && <ClipboardList size={13} className="text-[#8E8E93] shrink-0" />}
         </div>
-        <div className="flex items-center gap-2 mt-0.5 text-[13px]">
-          <span className={overdue ? 'text-ios-red font-medium' : 'text-[#8E8E93]'}>
-            {fmtDate(task.due_at)}
-          </span>
+        <div className="flex items-center gap-1.5 mt-1 text-[13px] flex-wrap">
+          {day && (
+            <span className={`badge !text-[12px] font-semibold ${
+              overdue || (day.kind === 'past' && !done)
+                ? 'bg-rose-500/20 text-rose-300'
+                : day.kind === 'today'
+                  ? 'bg-ios-blue/20 text-ios-blue'
+                  : day.kind === 'tomorrow'
+                    ? 'bg-amber-500/20 text-amber-300'
+                    : 'bg-white/10 text-[#8E8E93]'
+            }`}>
+              {overdue ? `⚠ Gecikti · ${day.label}` : day.kind === 'future' ? `📅 ${day.label}` : day.label}
+            </span>
+          )}
           {specialStatus && (
             <span className={`badge ${STATUS_COLOR[task.status]}`}>{STATUS_LABEL[task.status]}</span>
           )}

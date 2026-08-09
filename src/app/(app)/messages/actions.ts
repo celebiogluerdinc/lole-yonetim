@@ -155,11 +155,21 @@ export async function deleteMessage(messageId: string) {
 /** Mark a conversation read for the current user. */
 export async function markRead(conversationId: string) {
   const { supabase, profile } = await getCtx();
-  await supabase
-    .from('conversation_members')
-    .update({ last_read_at: new Date().toISOString() })
-    .eq('conversation_id', conversationId)
-    .eq('user_id', profile.id);
+  await Promise.all([
+    supabase
+      .from('conversation_members')
+      .update({ last_read_at: new Date().toISOString() })
+      .eq('conversation_id', conversationId)
+      .eq('user_id', profile.id),
+    // bu sohbete ait mesaj bildirimlerini de okundu yap → menü rozeti temizlenir
+    supabase
+      .from('notifications')
+      .update({ read_at: new Date().toISOString() })
+      .eq('user_id', profile.id)
+      .eq('type', 'message')
+      .is('read_at', null)
+      .eq('payload->>conversation_id', conversationId)
+  ]);
   revalidatePath('/messages'); // okunmadı rozeti hemen güncellensin
   return { ok: true };
 }

@@ -10,13 +10,16 @@ export default async function LeavePage() {
 
   const isManager = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
 
-  // RLS: staff → own; managers → own + team; admin → company
-  const { data: requests } = await supabase
+  // Güvence: personel YALNIZCA kendi taleplerini görür (veritabanı kuralına ek olarak
+  // uygulama tarafında da filtrelenir); yönetici ve müdürler ekip taleplerini görür.
+  let q = supabase
     .from('leave_requests')
     .select('*, profiles:user_id(full_name)')
     .eq('company_id', companyId)
     .order('created_at', { ascending: false })
     .limit(100);
+  if (!isManager) q = q.eq('user_id', profile.id);
+  const { data: requests } = await q;
 
   return (
     <LeaveClient

@@ -11,7 +11,7 @@ const LEAVE_TR: Record<string, string> = {
 
 export default async function CalendarPage({
   searchParams
-}: { searchParams: { m?: string; scope?: string } }) {
+}: { searchParams: { m?: string; scope?: string; k?: string } }) {
   const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
 
   const now = new Date();
@@ -26,6 +26,7 @@ export default async function CalendarPage({
 
   const isManager = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
   const scope = isManager && searchParams.scope === 'team' ? 'team' : 'mine';
+  const kat = ['tasks', 'shifts', 'leave'].includes(searchParams.k ?? '') ? searchParams.k! : 'all';
 
   // görevler + vardiyalar + onaylı izinler — tek takvimde
   const monthStartIso = monthStart.toISOString();
@@ -92,9 +93,28 @@ export default async function CalendarPage({
       (byDay[dayKey(d.toISOString())] ??= []).push({ kind: 'leave', sort: '00:00', el: l });
     }
   }
-  for (const k of Object.keys(byDay)) byDay[k].sort((a, b) => a.sort.localeCompare(b.sort));
+  // kategori filtresi + gün içinde kategoriye göre sırala (görev → vardiya → izin)
+  const KIND_ORDER: Record<string, number> = { task: 0, shift: 1, leave: 2 };
+  const catCounts = { tasks: tasks.length, shifts: shifts.length, leave: leaves.length };
+  for (const k of Object.keys(byDay)) {
+    if (kat !== 'all') {
+      byDay[k] = byDay[k].filter(e =>
+        (kat === 'tasks' && e.kind === 'task') ||
+        (kat === 'shifts' && e.kind === 'shift') ||
+        (kat === 'leave' && e.kind === 'leave'));
+    }
+    byDay[k].sort((a, b) =>
+      KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.sort.localeCompare(b.sort));
+    if (byDay[k].length === 0) delete byDay[k];
+  }
 
   const monthLabel = monthStart.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const KAT_CHIPS = [
+    ['all', `Tümü`, ''],
+    ['tasks', `📋 Görevler (${catCounts.tasks})`, '#0A84FF'],
+    ['shifts', `🕐 Vardiyalar (${catCounts.shifts})`, '#FF9F0A'],
+    ['leave', `🏖 İzinler (${catCounts.leave})`, '#30B0C7']
+  ] as const;
 
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8">
@@ -108,17 +128,29 @@ export default async function CalendarPage({
       </div>
 
       {isManager && (
-        <div className="flex gap-1.5 mb-5">
-          <Link href={`/calendar?m=${y}-${m}&scope=mine`}
+        <div className="flex gap-1.5 mb-3">
+          <Link href={`/calendar?m=${y}-${m}&scope=mine&k=${kat}`}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === 'mine' ? 'bg-ios-blue text-white' : 'bg-[#1C1C1E] text-[#D1D1D6]'}`}>
             Benim ajandam
           </Link>
-          <Link href={`/calendar?m=${y}-${m}&scope=team`}
+          <Link href={`/calendar?m=${y}-${m}&scope=team&k=${kat}`}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${scope === 'team' ? 'bg-ios-blue text-white' : 'bg-[#1C1C1E] text-[#D1D1D6]'}`}>
             Ekip takvimi
           </Link>
         </div>
       )}
+
+      {/* kategori filtresi */}
+      <div className="flex gap-1.5 mb-5 overflow-x-auto -mx-1 px-1 pb-1">
+        {KAT_CHIPS.map(([k, l, color]) => (
+          <Link key={k} href={`/calendar?m=${y}-${m}&scope=${scope}&k=${k}`}
+            className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+              kat === k ? 'text-white' : 'bg-[#1C1C1E] text-[#D1D1D6]'}`}
+            style={kat === k ? { backgroundColor: color || '#5856D6' } : undefined}>
+            {l}
+          </Link>
+        ))}
+      </div>
 
       {Object.keys(byDay).length === 0 && (
         <div className="card p-10 text-center text-sm text-[#8E8E93]">
@@ -136,7 +168,7 @@ export default async function CalendarPage({
                   const task = e.el;
                   return (
                     <Link key={`t${task.id}-${i}`} href={`/tasks/${task.id}`}
-                      className="flex items-center gap-3 p-3.5 hover:bg-[#1C1C1E]/[0.04] transition-colors">
+                      className="flex items-center gap-3 p-3.5 border-l-[3px] border-ios-blue hover:bg-[#1C1C1E]/[0.04] transition-colors">
                       <span className="text-xs font-semibold text-ios-blue w-12 shrink-0">{t(task.due_at)}</span>
                       <span className={`flex-1 text-sm truncate ${task.status === 'completed' ? 'line-through text-[#AEAEB2]' : ''}`}>
                         {task.title}
@@ -150,7 +182,7 @@ export default async function CalendarPage({
                 if (e.kind === 'shift') {
                   const s = e.el;
                   return (
-                    <div key={`s${s.id}-${i}`} className="flex items-center gap-3 p-3.5">
+                    <div key={`s${s.id}-${i}`} className="flex items-center gap-3 p-3.5 border-l-[3px] border-ios-orange">
                       <span className="text-xs font-semibold text-ios-orange w-12 shrink-0">{t(s.starts_at)}</span>
                       <CalendarClock size={14} className="text-ios-orange shrink-0" />
                       <span className="flex-1 text-sm truncate">
@@ -164,7 +196,7 @@ export default async function CalendarPage({
                 }
                 const l = e.el;
                 return (
-                  <div key={`l${l.id}-${i}`} className="flex items-center gap-3 p-3.5">
+                  <div key={`l${l.id}-${i}`} className="flex items-center gap-3 p-3.5 border-l-[3px] border-[#30B0C7]">
                     <span className="text-xs font-semibold text-[#30B0C7] w-12 shrink-0">Tüm gün</span>
                     <Plane size={14} className="text-[#30B0C7] shrink-0" />
                     <span className="flex-1 text-sm truncate">

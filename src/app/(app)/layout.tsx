@@ -11,7 +11,15 @@ export const dynamic = 'force-dynamic';
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
 
-  const [companyRes, { count: unreadCount }, appNameRes] = await Promise.all([
+  // same rule the /manage pages enforce — "manager" role alone isn't enough,
+  // the user must actually manage a department (or be an admin)
+  const isManagerRole = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
+  const isAdminRole = ['super_admin', 'admin'].includes(profile.role);
+
+  const [
+    companyRes, { count: unreadCount }, appNameRes,
+    { count: msgUnreadCount }, annRes, annReadRes, { count: reviewCount }, myAssignedRes
+  ] = await Promise.all([
     companyId
       ? supabase.from('companies').select('name').eq('id', companyId).maybeSingle()
       : Promise.resolve({ data: null } as any),
@@ -19,33 +27,57 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       .select('id', { count: 'exact', head: true })
       .eq('user_id', profile.id)
       .is('read_at', null),
-    supabase.from('app_settings').select('value').eq('key', 'app_name').maybeSingle()
+    supabase.from('app_settings').select('value').eq('key', 'app_name').maybeSingle(),
+    // okunmamış mesaj sayısı (sohbet açılınca otomatik temizlenir)
+    supabase.from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', profile.id).eq('type', 'message').is('read_at', null),
+    // okunmamış duyuru: şirket duyuruları − okuduklarım
+    companyId
+      ? supabase.from('announcements').select('id').eq('company_id', companyId).limit(200)
+      : Promise.resolve({ data: [] } as any),
+    supabase.from('announcement_reads').select('announcement_id').eq('user_id', profile.id),
+    // yöneticiler: onay bekleyen görev sayısı
+    isManagerRole && companyId
+      ? supabase.from('tasks')
+          .select('id', { count: 'exact', head: true })
+          .eq('company_id', companyId).eq('status', 'pending_review')
+      : Promise.resolve({ count: 0 } as any),
+    // bana atanan açık görevler (bugün + geciken → Ana Sayfa rozeti)
+    supabase.from('task_assignees').select('tasks(status, due_at)').eq('user_id', profile.id)
   ]);
   const appName = appNameRes?.data?.value ?? 'Lole Yönetim';
   let companyName = appName;
   if (companyRes?.data) companyName = companyRes.data.name;
   else if (profile.role === 'super_admin') companyName = 'Tüm Şirketler';
   const unread = unreadCount ?? 0;
+  const msgUnread = msgUnreadCount ?? 0;
 
-  // same rule the /manage pages enforce — "manager" role alone isn't enough,
-  // the user must actually manage a department (or be an admin)
-  const isManagerRole = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
-  const isAdminRole = ['super_admin', 'admin'].includes(profile.role);
+  const readSet = new Set((annReadRes?.data ?? []).map((r: any) => r.announcement_id));
+  const annUnread = (annRes?.data ?? []).filter((a: any) => !readSet.has(a.id)).length;
+
+  const now = Date.now();
+  const todayIst = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
+  const myToday = (myAssignedRes?.data ?? [])
+    .map((r: any) => r.tasks).filter(Boolean)
+    .filter((t: any) => !['completed', 'cancelled'].includes(t.status) && t.due_at &&
+      (new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date(t.due_at)) === todayIst
+        || new Date(t.due_at).getTime() < now)).length;
 
   const nav = ([
-    { href: '/home', label: 'Ana Sayfa', icon: 'home', show: true, badge: 0 },
-    { href: '/messages', label: 'Mesajlar', icon: 'chat', show: true, badge: 0 },
+    { href: '/home', label: 'Ana Sayfa', icon: 'home', show: true, badge: myToday },
+    { href: '/messages', label: 'Mesajlar', icon: 'chat', show: true, badge: msgUnread },
     { href: '/assistant', label: 'Lole Asistan', icon: 'sparkles', show: !!process.env.ANTHROPIC_API_KEY, badge: 0 },
     { href: '/notifications', label: 'Bildirimler', icon: 'bell', show: true, badge: unread },
     { href: '/calendar', label: 'Takvim', icon: 'calendar', show: true, badge: 0 },
-    { href: '/announcements', label: 'Duyurular', icon: 'megaphone', show: true, badge: 0 },
+    { href: '/announcements', label: 'Duyurular', icon: 'megaphone', show: true, badge: annUnread },
     { href: '/performance', label: 'Performans', icon: 'chart', show: true, badge: 0 },
     { href: '/purchasing', label: 'Satın Alma', icon: 'cart', show: true, badge: 0 },
     { href: '/payments', label: 'Ödeme Talepleri', icon: 'wallet', show: true, badge: 0 },
     { href: '/shifts', label: 'Vardiyalar', icon: 'shift', show: true, badge: 0 },
     { href: '/leave', label: 'İzinler', icon: 'leave', show: true, badge: 0 },
     { href: '/clock', label: 'Mesai', icon: 'clock', show: true, badge: 0 },
-    { href: '/manage/tasks', label: 'Görevler', icon: 'tasks', show: isManagerRole, badge: 0 },
+    { href: '/manage/tasks', label: 'Görevler', icon: 'tasks', show: isManagerRole, badge: reviewCount ?? 0 },
     { href: '/manage/templates', label: 'Şablonlar', icon: 'template', show: isManagerRole, badge: 0 },
     { href: '/admin/users', label: 'Kullanıcılar', icon: 'users', show: isAdminRole, badge: 0 },
     { href: '/admin/departments', label: 'Departmanlar', icon: 'building', show: isAdminRole, badge: 0 },
