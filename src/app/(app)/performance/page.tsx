@@ -45,7 +45,7 @@ const rate = (b: Bucket) => {
 
 /** Stacked status bar — green/orange/red segments with 2px gaps, gray remainder. */
 function StatusBar({ b }: { b: Bucket }) {
-  if (!b.total) return <div className="h-[6px] rounded-full bg-[#1C1C1E]/[0.10]" />;
+  if (!b.total) return <div className="h-[6px] rounded-full bg-white/10" />;
   const seg = (n: number) => `${(n / b.total) * 100}%`;
   return (
     <div className="flex h-[6px] rounded-full overflow-hidden gap-[2px]">

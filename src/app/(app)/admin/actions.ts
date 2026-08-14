@@ -57,6 +57,11 @@ export async function createUser(formData: FormData) {
   const authErr = requireAdmin(profile.role);
   if (authErr) return { error: authErr };
 
+  // güvenlik zinciri: YENİ admin hesabını yalnızca Süper Admin oluşturabilir
+  if (input.role === 'admin' && profile.role !== 'super_admin') {
+    return { error: 'Yeni Admin hesabını yalnızca Süper Admin oluşturabilir. Müdür veya Personel ekleyebilirsiniz.' };
+  }
+
   // admin ve süper admin İSTEDİĞİ şirkete kullanıcı ekleyebilir
   const companyId = ['super_admin', 'admin'].includes(profile.role)
     ? (input.company_id ?? actingCompany)
@@ -113,6 +118,7 @@ export async function updateUser(formData: FormData) {
     full_name: z.string().min(2).max(120),
     role: z.enum(['super_admin', 'admin', 'manager', 'staff']),
     new_password: z.string().max(72).optional().default(''),
+    leave_allowance: z.coerce.number().min(0).max(90).default(14),
     departments: z.array(z.string().uuid()).default([]),
     manager_departments: z.array(z.string().uuid()).default([])
   });
@@ -121,6 +127,7 @@ export async function updateUser(formData: FormData) {
     full_name: String(formData.get('full_name') ?? '').trim(),
     role: String(formData.get('role') ?? 'staff'),
     new_password: String(formData.get('new_password') ?? '').trim(),
+    leave_allowance: formData.get('leave_allowance') || 14,
     departments: formData.getAll('departments').map(String),
     manager_departments: formData.getAll('manager_departments').map(String)
   });
@@ -145,11 +152,18 @@ export async function updateUser(formData: FormData) {
   if (profile.role !== 'super_admin' && (input.role === 'super_admin' || target.role === 'super_admin')) {
     return { error: 'Süper Admin yetkisini yalnızca bir Süper Admin değiştirebilir.' };
   }
+  // Admin yetkisi verme/alma da yalnızca Süper Admin'e aittir (yetki zinciri koruması)
+  if (profile.role !== 'super_admin' && input.role !== target.role &&
+      (input.role === 'admin' || target.role === 'admin')) {
+    return { error: 'Admin yetkisini yalnızca Süper Admin verebilir veya alabilir.' };
+  }
   // kendi rolünü düşürmesin
   const roleToSet = input.user_id === profile.id ? target.role : input.role;
 
   const ops: any[] = [
-    admin.from('profiles').update({ full_name: input.full_name, role: roleToSet }).eq('id', input.user_id)
+    admin.from('profiles').update({
+      full_name: input.full_name, role: roleToSet, leave_allowance: input.leave_allowance
+    }).eq('id', input.user_id)
   ];
   if (input.new_password) {
     ops.push(admin.auth.admin.updateUserById(input.user_id, { password: input.new_password }));

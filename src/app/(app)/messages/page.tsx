@@ -91,7 +91,7 @@ export default async function MessagesPage() {
         )}
         {rows.map(r => (
           <Link key={r.id} href={`/messages/${r.id}`}
-            className="flex items-center gap-3 px-4 py-3 hover:bg-[#1C1C1E]/[0.04] transition-colors">
+            className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors">
             <span
               className="w-11 h-11 rounded-full flex items-center justify-center text-white font-semibold shrink-0"
               style={{ backgroundColor: colorFor(r.title) }}

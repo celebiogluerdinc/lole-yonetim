@@ -8,9 +8,15 @@ import { pushToUsers } from '@/lib/push';
 
 /** Start (or reopen) a 1-on-1 conversation with a coworker. */
 export async function startDm(otherId: string) {
+  if (!z.string().uuid().safeParse(otherId).success) return { error: 'Geçersiz kullanıcı.' };
   const { supabase, profile, companyId } = await getCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
   if (otherId === profile.id) return { error: 'Kendinizle sohbet başlatamazsınız.' };
+
+  // güvenlik: hedef kişi aktif şirketin çalışanı olmalı
+  const { data: other } = await supabase.from('profiles')
+    .select('id').eq('id', otherId).eq('company_id', companyId).maybeSingle();
+  if (!other) return { error: 'Kullanıcı bulunamadı.' };
 
   // existing DM between us?
   const { data: mine } = await supabase
@@ -47,12 +53,20 @@ export async function startDm(otherId: string) {
 /** Create a named group conversation. */
 export async function createGroup(formData: FormData) {
   const name = z.string().min(2).max(80).safeParse(String(formData.get('name') ?? '').trim());
-  const members = formData.getAll('members').map(String);
+  const members = formData.getAll('members').map(String)
+    .filter(m => z.string().uuid().safeParse(m).success);
   if (!name.success) return { error: 'Grup adı gerekli.' };
   if (members.length === 0) return { error: 'En az bir kişi seçin.' };
 
   const { supabase, profile, companyId } = await getCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  // güvenlik: tüm üyeler aktif şirketin çalışanı olmalı
+  const { data: valid } = await supabase.from('profiles')
+    .select('id').in('id', members).eq('company_id', companyId);
+  if ((valid ?? []).length !== members.length) {
+    return { error: 'Seçilen kişilerden bazıları bu şirkette bulunamadı.' };
+  }
 
   const { data: conv, error } = await supabase
     .from('conversations')

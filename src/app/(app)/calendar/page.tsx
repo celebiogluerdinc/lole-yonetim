@@ -260,7 +260,7 @@ export default async function CalendarPage({
                   const task = e.el;
                   return (
                     <Link key={`t${task.id}-${i}`} href={`/tasks/${task.id}`}
-                      className="flex items-center gap-3 p-3.5 border-l-[3px] border-ios-blue hover:bg-[#1C1C1E]/[0.04] transition-colors">
+                      className="flex items-center gap-3 p-3.5 border-l-[3px] border-ios-blue hover:bg-white/[0.04] transition-colors">
                       <span className="text-xs font-semibold text-ios-blue w-12 shrink-0">{t(task.due_at)}</span>
                       <span className={`flex-1 text-sm truncate ${task.status === 'completed' ? 'line-through text-[#AEAEB2]' : ''}`}>
                         {task.title}

@@ -65,10 +65,11 @@ export async function quickComplete(taskId: string, force = false) {
   if (task.requires_photo && !(myPhotos ?? 0)) return { error: 'photo_required' };
 
   const nextStatus = task.requires_approval ? 'pending_review' : 'completed';
-  const { error } = await supabase.from('tasks').update({
+  const { data: updated, error } = await supabase.from('tasks').update({
     status: nextStatus, completed_at: new Date().toISOString()
-  }).eq('id', taskId);
+  }).eq('id', taskId).in('status', ['open', 'in_progress', 'blocked']).select('id');
   if (error) return { error: error.message };
+  if (!updated?.length) return { error: 'Görev az önce başka biri tarafından güncellendi.' };
 
   await Promise.all([
     log(supabase, task.company_id, profile.id, 'task', taskId,
@@ -139,10 +140,11 @@ export async function completeTask(taskId: string, force = false) {
   }
 
   const nextStatus = task.requires_approval ? 'pending_review' : 'completed';
-  const { error } = await supabase.from('tasks').update({
+  const { data: updated, error } = await supabase.from('tasks').update({
     status: nextStatus, completed_at: new Date().toISOString(), blocked_reason: null
-  }).eq('id', taskId);
+  }).eq('id', taskId).in('status', ['open', 'in_progress', 'blocked']).select('id');
   if (error) return { error: error.message };
+  if (!updated?.length) return { error: 'Görev az önce başka biri tarafından güncellendi.' };
 
   await Promise.all([
     log(supabase, task.company_id, profile.id, 'task', taskId,
@@ -170,13 +172,14 @@ export async function managerSetTaskStatus(taskId: string, status: 'completed' |
   if (!allowed) return { error: 'Bu görev üzerinde yetkiniz yok.' };
   if (['completed', 'cancelled'].includes(task.status) && task.status === status) return { ok: true };
 
-  const { error } = await supabase.from('tasks').update({
+  const { data: updated, error } = await supabase.from('tasks').update({
     status,
     completed_at: status === 'completed' ? new Date().toISOString() : task.completed_at,
     blocked_reason: null,
     ...(status === 'completed' ? { approved_by: profile.id, approved_at: new Date().toISOString() } : {})
-  }).eq('id', taskId);
+  }).eq('id', taskId).not('status', 'in', '("completed","cancelled")').select('id');
   if (error) return { error: error.message };
+  if (!updated?.length) return { error: 'Görev zaten kapatılmış.' };
 
   const notifyAssignees = async () => {
     const { data: asg } = await supabase
@@ -248,19 +251,21 @@ export async function reviewTask(taskId: string, approve: boolean, note?: string
   if (task.status !== 'pending_review') return { error: 'Görev onay beklemiyor.' };
 
   if (approve) {
-    const { error } = await supabase.from('tasks').update({
+    const { data: updated, error } = await supabase.from('tasks').update({
       status: 'completed', approved_by: profile.id,
       approved_at: new Date().toISOString(), rejection_note: null
-    }).eq('id', taskId);
+    }).eq('id', taskId).eq('status', 'pending_review').select('id'); // yarış koruması
     if (error) return { error: error.message };
+    if (!updated?.length) return { error: 'Görev az önce başka biri tarafından sonuçlandırıldı.' };
     await log(supabase, task.company_id, profile.id, 'task', taskId, 'approved');
   } else {
     const n = z.string().min(3).max(500).safeParse((note ?? '').trim());
     if (!n.success) return { error: 'Reddetme sebebi zorunludur.' };
-    const { error } = await supabase.from('tasks').update({
+    const { data: updated, error } = await supabase.from('tasks').update({
       status: 'open', completed_at: null, rejection_note: n.data
-    }).eq('id', taskId);
+    }).eq('id', taskId).eq('status', 'pending_review').select('id'); // yarış koruması
     if (error) return { error: error.message };
+    if (!updated?.length) return { error: 'Görev az önce başka biri tarafından sonuçlandırıldı.' };
 
     const notifyAssignees = async () => {
       const { data: asg } = await supabase.from('task_assignees').select('user_id').eq('task_id', taskId);
@@ -497,18 +502,21 @@ export async function updateTask(formData: FormData) {
       .gte('due_at', new Date().toISOString());
     const sibIds = (siblings ?? []).map((s: any) => s.id);
     if (sibIds.length) {
-      await supabase.from('tasks').update({
+      const { error: e1 } = await supabase.from('tasks').update({
         title: i.title,
         description: i.description || null,
         priority: i.priority,
         requires_photo: i.requires_photo,
         requires_approval: i.requires_approval
       }).in('id', sibIds);
-      // atananları eşitle
-      await supabase.from('task_assignees').delete().in('task_id', sibIds);
-      await supabase.from('task_assignees').insert(
+      if (e1) return { error: `Seri güncellenirken hata: ${e1.message}` };
+      // atananları eşitle (hata kontrolüyle — görevler sahipsiz kalmasın)
+      const { error: e2 } = await supabase.from('task_assignees').delete().in('task_id', sibIds);
+      if (e2) return { error: `Seri atamaları güncellenemedi: ${e2.message}` };
+      const { error: e3 } = await supabase.from('task_assignees').insert(
         sibIds.flatMap((tid: string) => i.assignees.map(uid => ({ task_id: tid, user_id: uid })))
       );
+      if (e3) return { error: `Seri atamaları eklenemedi: ${e3.message} — atamaları görevden tekrar kaydedin.` };
       seriesUpdated = sibIds.length;
     }
   }

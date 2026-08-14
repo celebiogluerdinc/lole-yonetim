@@ -67,6 +67,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const nav = ([
     { href: '/home', label: 'Ana Sayfa', icon: 'home', show: true, badge: myToday },
+    { href: '/search', label: 'Arama', icon: 'search', show: true, badge: 0 },
     { href: '/messages', label: 'Mesajlar', icon: 'chat', show: true, badge: msgUnread },
     { href: '/assistant', label: 'Lole Asistan', icon: 'sparkles', show: !!process.env.ANTHROPIC_API_KEY, badge: 0 },
     { href: '/notifications', label: 'Bildirimler', icon: 'bell', show: true, badge: unread },
@@ -78,6 +79,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/shifts', label: 'Vardiyalar', icon: 'shift', show: true, badge: 0 },
     { href: '/leave', label: 'İzinler', icon: 'leave', show: true, badge: 0 },
     { href: '/clock', label: 'Mesai', icon: 'clock', show: true, badge: 0 },
+    { href: '/files', label: 'Dosyalar', icon: 'folder', show: true, badge: 0 },
     { href: '/manage/tasks', label: 'Görevler', icon: 'tasks', show: isManagerRole, badge: reviewCount ?? 0 },
     { href: '/manage/templates', label: 'Şablonlar', icon: 'template', show: isManagerRole, badge: 0 },
     { href: '/admin/users', label: 'Kullanıcılar', icon: 'users', show: isAdminRole, badge: 0 },

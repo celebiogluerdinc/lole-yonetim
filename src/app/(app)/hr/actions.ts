@@ -144,7 +144,11 @@ export async function addShift(formData: FormData) {
   }
 
   const { error } = await supabase.from('shifts').insert(rows);
-  if (error) return { error: error.message };
+  if (error) {
+    return { error: error.code === '23P01'
+      ? '⚠️ Vardiya çakışması: seçilen kişilerden birinin bu saat aralığında zaten vardiyası var.'
+      : error.message };
+  }
 
   const first = baseDates[0].toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul', day: 'numeric', month: 'long' });
   const body = i.repeat === 'weekly'
@@ -154,6 +158,86 @@ export async function addShift(formData: FormData) {
 
   revalidatePath('/shifts');
   return { ok: true, count: rows.length };
+}
+
+/**
+ * Geçen haftanın vardiya planını bu haftaya kopyalar (+7 gün).
+ * Yalnızca yetkili departmanlar; aynı kişi-saat çakışması ve onaylı izin günleri atlanır.
+ */
+export async function copyPreviousWeekShifts(weekStartIso: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartIso)) return { error: 'Geçersiz hafta.' };
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+  const isAdmin = ['super_admin', 'admin'].includes(profile.role);
+  if (!isAdmin && managedDepartmentIds.length === 0) {
+    return { error: 'Vardiya planlamaya yetkiniz yok.' };
+  }
+
+  const weekStart = new Date(`${weekStartIso}T00:00:00+03:00`);
+  const prevStart = new Date(weekStart.getTime() - 7 * 86400000);
+  const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
+
+  // geçen haftanın vardiyaları (yetki kapsamında)
+  let q = supabase.from('shifts')
+    .select('user_id, department_id, starts_at, ends_at, note')
+    .eq('company_id', companyId)
+    .gte('starts_at', prevStart.toISOString())
+    .lt('starts_at', weekStart.toISOString());
+  if (!isAdmin) q = q.in('department_id', managedDepartmentIds);
+  const { data: prevShifts } = await q;
+  if (!prevShifts?.length) return { error: 'Geçen haftada kopyalanacak vardiya yok.' };
+
+  // bu haftada zaten var olanlar (mükerrer önleme) + izinli günler
+  const userIds = Array.from(new Set(prevShifts.map((s: any) => s.user_id)));
+  const [{ data: existing }, { data: leaves }] = await Promise.all([
+    supabase.from('shifts')
+      .select('user_id, starts_at')
+      .eq('company_id', companyId)
+      .gte('starts_at', weekStart.toISOString()).lt('starts_at', weekEnd.toISOString())
+      .in('user_id', userIds),
+    supabase.from('leave_requests')
+      .select('user_id, start_date, end_date')
+      .eq('status', 'approved').in('user_id', userIds)
+      .lte('start_date', weekEnd.toISOString().slice(0, 10))
+      .gte('end_date', weekStart.toISOString().slice(0, 10))
+  ]);
+  const existingKeys = new Set((existing ?? []).map((s: any) =>
+    `${s.user_id}|${new Date(s.starts_at).toISOString()}`));
+
+  const dayIst = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(d);
+  const onLeave = (uid: string, d: Date) => (leaves ?? []).some((l: any) =>
+    l.user_id === uid && dayIst(d) >= l.start_date && dayIst(d) <= l.end_date);
+
+  const seriesId = crypto.randomUUID();
+  let skippedDup = 0, skippedLeave = 0;
+  const rows: any[] = [];
+  for (const s of prevShifts) {
+    const starts = new Date(new Date(s.starts_at).getTime() + 7 * 86400000);
+    const ends = new Date(new Date(s.ends_at).getTime() + 7 * 86400000);
+    if (existingKeys.has(`${s.user_id}|${starts.toISOString()}`)) { skippedDup++; continue; }
+    if (onLeave(s.user_id, starts)) { skippedLeave++; continue; }
+    rows.push({
+      company_id: companyId, department_id: s.department_id, user_id: s.user_id,
+      starts_at: starts.toISOString(), ends_at: ends.toISOString(),
+      note: s.note, created_by: profile.id, series_id: seriesId
+    });
+  }
+  if (!rows.length) {
+    return { error: `Kopyalanacak yeni vardiya kalmadı (${skippedDup} zaten planlı, ${skippedLeave} izinli).` };
+  }
+  const { error } = await supabase.from('shifts').insert(rows);
+  if (error) {
+    return { error: error.code === '23P01'
+      ? '⚠️ Vardiya çakışması: bazı kişilerin bu haftada çakışan vardiyası zaten var — önce mevcut planı kontrol edin.'
+      : error.message };
+  }
+
+  const affected = Array.from(new Set(rows.map(r => r.user_id)));
+  await notify(supabase, companyId, affected, '🗓 Vardiya planlandı',
+    'Bu haftanın vardiya programınız yayınlandı (geçen haftadan kopyalandı).', '/shifts');
+
+  revalidatePath('/shifts');
+  return { ok: true, count: rows.length, skippedDup, skippedLeave };
 }
 
 export async function deleteShift(id: string) {
@@ -271,10 +355,14 @@ export async function decideLeave(id: string, approve: boolean, note?: string) {
 }
 
 export async function cancelLeave(id: string) {
+  if (!z.string().uuid().safeParse(id).success) return { error: 'Geçersiz talep.' };
   const { supabase, profile } = await getCtx();
-  await supabase.from('leave_requests')
+  const { data, error } = await supabase.from('leave_requests')
     .update({ status: 'cancelled' })
-    .eq('id', id).eq('user_id', profile.id).eq('status', 'pending');
+    .eq('id', id).eq('user_id', profile.id).eq('status', 'pending')
+    .select('id');
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Talep bulunamadı veya zaten sonuçlanmış.' };
   revalidatePath('/leave');
   return { ok: true };
 }

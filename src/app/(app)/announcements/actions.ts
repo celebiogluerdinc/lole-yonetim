@@ -31,6 +31,12 @@ export async function postAnnouncement(formData: FormData) {
       return { error: 'Yalnızca yönettiğiniz departmana duyuru yayınlayabilirsiniz.' };
     }
   }
+  // güvenlik: departman bu şirkete ait olmalı (adminler dahil)
+  if (input.department_id) {
+    const { data: dept } = await supabase.from('departments')
+      .select('id').eq('id', input.department_id).eq('company_id', companyId).maybeSingle();
+    if (!dept) return { error: 'Geçersiz departman seçimi.' };
+  }
 
   const { data: ann, error } = await supabase.from('announcements').insert({
     company_id: companyId,
@@ -123,7 +129,7 @@ export async function addAnnouncementComment(formData: FormData) {
   const { supabase, profile, companyId } = await getCtx();
   const { data: ann } = await supabase.from('announcements')
     .select('id, company_id, author_id, title').eq('id', annId).maybeSingle();
-  if (!ann) return { error: 'Duyuru bulunamadı.' };
+  if (!ann || ann.company_id !== companyId) return { error: 'Duyuru bulunamadı.' };
 
   const { error } = await supabase.from('announcement_comments').insert({
     announcement_id: annId, company_id: ann.company_id,

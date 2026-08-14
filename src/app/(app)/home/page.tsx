@@ -245,7 +245,7 @@ export default async function HomePage({
                     : { label: 'Gecikti', cls: 'bg-rose-500/20 text-rose-300' };
                 return (
                   <Link key={t.id} href={`/tasks/${t.id}`}
-                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#1C1C1E]/[0.04] transition-colors">
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.04] transition-colors">
                     <span className="flex-1 min-w-0">
                       <p className="text-[14px] font-medium truncate">{t.title}</p>
                       <p className="text-[12px] text-[#8E8E93] truncate">
@@ -371,7 +371,7 @@ export default async function HomePage({
           </div>
           <div className="card divide-y divide-white/[0.08] overflow-hidden">
             {pano.slice(0, 4).map(a => (
-              <Link key={a.id} href="/announcements" className="flex items-start gap-3 px-4 py-3 hover:bg-[#1C1C1E]/[0.04] transition-colors">
+              <Link key={a.id} href="/announcements" className="flex items-start gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors">
                 <span className="smart-icon !w-7 !h-7 mt-0.5" style={{ backgroundColor: a.is_pinned ? '#FF9500' : '#8E8E93' }}>
                   {a.is_pinned ? <Pin size={14} /> : <Inbox size={14} />}
                 </span>

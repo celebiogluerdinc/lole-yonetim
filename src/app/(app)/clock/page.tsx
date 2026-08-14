@@ -25,7 +25,12 @@ export default async function ClockPage({
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
 
-  const [{ data: openEntry }, { data: myEntries }, teamRes] = await Promise.all([
+  // bugünün İstanbul sınırları (timestamptz karşılaştırması — tarih stringi üretme yok)
+  const todayIst = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
+  const dayStartIst = new Date(`${todayIst}T00:00:00+03:00`);
+  const dayEndIst = new Date(dayStartIst.getTime() + 86400000);
+
+  const [{ data: openEntry }, { data: myEntries }, teamRes, shiftsRes] = await Promise.all([
     supabase.from('time_entries').select('*')
       .eq('user_id', profile.id).is('clock_out', null)
       .order('clock_in', { ascending: false }).limit(1).maybeSingle(),
@@ -38,8 +43,39 @@ export default async function ClockPage({
           .eq('company_id', companyId)
           .gte('clock_in', todayStart.toISOString())
           .order('clock_in', { ascending: false })
+      : Promise.resolve({ data: [] } as any),
+    isManager
+      ? supabase.from('shifts')
+          .select('user_id, starts_at, ends_at, profiles:user_id(full_name)')
+          .eq('company_id', companyId)
+          .gte('starts_at', dayStartIst.toISOString())
+          .lt('starts_at', dayEndIst.toISOString())
+          .order('starts_at')
       : Promise.resolve({ data: [] } as any)
   ]);
+
+  // ---- bugünün vardiya yoklaması: geç kalan / gelmeyen (yöneticiler) ----
+  const nowMs = Date.now();
+  const firstClockIn: Record<string, number> = {};
+  for (const e of (teamRes?.data ?? []) as any[]) {
+    const t = new Date(e.clock_in).getTime();
+    if (!(e.user_id in firstClockIn) || t < firstClockIn[e.user_id]) firstClockIn[e.user_id] = t;
+  }
+  const attendance = ((shiftsRes?.data ?? []) as any[])
+    .filter(s => new Date(s.starts_at).getTime() <= nowMs) // yalnız başlamış vardiyalar
+    .map(s => {
+      const startMs = new Date(s.starts_at).getTime();
+      const cin = firstClockIn[s.user_id];
+      let status: 'ontime' | 'late' | 'absent'; let lateMin = 0;
+      if (cin === undefined) status = 'absent';
+      else if (cin > startMs + 5 * 60000) { status = 'late'; lateMin = Math.round((cin - startMs) / 60000); }
+      else status = 'ontime';
+      return {
+        name: s.profiles?.full_name ?? '?',
+        shift: `${hhmm(s.starts_at)}–${hhmm(s.ends_at)}`,
+        status, lateMin
+      };
+    });
 
   const weekTotal = (myEntries ?? [])
     .reduce((a: number, e: any) => a + (hours(e.clock_in, e.clock_out) ?? 0), 0);
@@ -70,6 +106,7 @@ export default async function ClockPage({
       rows={rows}
       weekTotal={Math.round(weekTotal * 10) / 10}
       team={team}
+      attendance={attendance}
       isManager={isManager}
       isAdmin={['super_admin', 'admin'].includes(profile.role)}
     />

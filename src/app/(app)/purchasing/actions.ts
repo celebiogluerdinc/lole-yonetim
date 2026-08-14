@@ -80,6 +80,13 @@ export async function createPurchaseRequest(formData: FormData) {
   const { supabase, profile, companyId } = await getCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
+  // güvenlik: departman bu şirkete ait olmalı
+  if (i.department_id) {
+    const { data: dept } = await supabase.from('departments')
+      .select('id').eq('id', i.department_id).eq('company_id', companyId).maybeSingle();
+    if (!dept) return { error: 'Geçersiz departman seçimi.' };
+  }
+
   const { data: req, error } = await supabase.from('purchase_requests').insert({
     company_id: companyId,
     department_id: i.department_id,
@@ -156,13 +163,14 @@ export async function decidePurchaseRequest(id: string, approve: boolean, note?:
     return { error: 'Bu talep yönettiğiniz departmanların kapsamında değil.' };
   }
 
-  const { error } = await supabase.from('purchase_requests').update({
+  const { data: updated, error } = await supabase.from('purchase_requests').update({
     status: approve ? 'approved' : 'rejected',
     decided_by: profile.id,
     decided_at: new Date().toISOString(),
     decision_note: note?.trim().slice(0, 500) || null
-  }).eq('id', id).eq('status', 'pending');
+  }).eq('id', id).eq('status', 'pending').select('id'); // yarış koruması
   if (error) return { error: error.message };
+  if (!updated?.length) return { error: 'Bu talep az önce başka biri tarafından sonuçlandırıldı.' };
 
   await supabase.from('notifications').insert({
     company_id: req.company_id, user_id: req.requester_id, type: 'custom',
@@ -195,9 +203,10 @@ export async function completePurchaseRequest(id: string) {
     return { error: 'Bu talep yönettiğiniz departmanların kapsamında değil.' };
   }
 
-  const { error } = await supabase.from('purchase_requests')
-    .update({ status: 'completed' }).eq('id', id).eq('status', 'approved');
+  const { data: updated, error } = await supabase.from('purchase_requests')
+    .update({ status: 'completed' }).eq('id', id).eq('status', 'approved').select('id');
   if (error) return { error: error.message };
+  if (!updated?.length) return { error: 'Bu talep az önce başka biri tarafından güncellendi.' };
 
   await supabase.from('notifications').insert({
     company_id: req.company_id, user_id: req.requester_id, type: 'custom',

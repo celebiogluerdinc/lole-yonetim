@@ -44,5 +44,7 @@ export async function changeMyPassword(formData: FormData) {
 
   const { error } = await supabase.auth.updateUser({ password: i.next });
   if (error) return { error: `Parola değiştirilemedi: ${error.message}` };
+  // güvenlik: diğer cihazlardaki açık oturumları kapat (bu oturum korunur)
+  await supabase.auth.signOut({ scope: 'others' }).catch(() => {});
   return { ok: true };
 }

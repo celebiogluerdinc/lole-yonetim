@@ -14,25 +14,25 @@ export default async function PurchasingPage({
   const tab = searchParams.tab === 'templates' ? 'templates' : 'requests';
   const isDecider = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
 
-  const [reqRes, itemRes, tplRes, tplItemRes, deptRes] = await Promise.all([
+  // kalemler embed ile tek istekte gelir (filtresiz ayrı sorgular kaldırıldı)
+  const [reqRes, tplRes, deptRes] = await Promise.all([
     supabase.from('purchase_requests')
-      .select('*, requester:requester_id(full_name), decider:decided_by(full_name), departments:department_id(name)')
+      .select('*, requester:requester_id(full_name), decider:decided_by(full_name), departments:department_id(name), purchase_items(*)')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
       .limit(300),
-    supabase.from('purchase_items').select('*').order('position'),
     supabase.from('purchase_templates')
-      .select('*, creator:created_by(full_name), departments:department_id(name)')
+      .select('*, creator:created_by(full_name), departments:department_id(name), purchase_template_items(*)')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false }),
-    supabase.from('purchase_template_items').select('*').order('position'),
     supabase.from('departments').select('id, name').eq('company_id', companyId).order('name')
   ]);
 
+  const byPos = (a: any, b: any) => (a.position ?? 0) - (b.position ?? 0);
   const itemsByReq: Record<string, any[]> = {};
-  for (const it of itemRes.data ?? []) (itemsByReq[it.request_id] ??= []).push(it);
+  for (const r of reqRes.data ?? []) itemsByReq[r.id] = (r.purchase_items ?? []).sort(byPos);
   const itemsByTpl: Record<string, any[]> = {};
-  for (const it of tplItemRes.data ?? []) (itemsByTpl[it.template_id] ??= []).push(it);
+  for (const t of tplRes.data ?? []) itemsByTpl[t.id] = (t.purchase_template_items ?? []).sort(byPos);
 
   const fmt = (iso: string) => new Date(iso).toLocaleDateString('tr-TR', {
     timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric'

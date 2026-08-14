@@ -83,7 +83,7 @@ export default async function NotificationsPage() {
               {!n.read_at && <span className="w-2.5 h-2.5 rounded-full bg-ios-blue shrink-0 mt-1" />}
             </>
           );
-          const cls = 'flex items-start gap-3 px-4 py-3 hover:bg-[#1C1C1E]/[0.04] transition-colors';
+          const cls = 'flex items-start gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors';
           return href
             ? <Link key={n.id} href={href} className={cls}>{inner}</Link>
             : <div key={n.id} className={cls}>{inner}</div>;

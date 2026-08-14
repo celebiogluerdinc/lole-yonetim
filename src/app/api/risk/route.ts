@@ -22,6 +22,28 @@ export async function GET(req: NextRequest) {
   const now = Date.now();
   const in24h = new Date(now + 24 * 3600 * 1000).toISOString();
 
+  // ---- günlük bakım: 16 saatten uzun süredir açık kalan mesaileri otomatik kapat ----
+  const cutoff = new Date(now - 16 * 3600 * 1000).toISOString();
+  const { data: staleEntries } = await admin
+    .from('time_entries')
+    .select('id, user_id, company_id, clock_in')
+    .is('clock_out', null)
+    .lt('clock_in', cutoff)
+    .limit(200);
+  if (staleEntries?.length) {
+    await admin.from('time_entries')
+      .update({ clock_out: new Date().toISOString(), note: 'Sistem: çıkış unutuldu, otomatik kapatıldı' })
+      .in('id', staleEntries.map((e: any) => e.id));
+    await admin.from('notifications').insert(staleEntries.map((e: any) => ({
+      company_id: e.company_id, user_id: e.user_id, type: 'custom',
+      payload: {
+        title: '⏱ Mesainiz otomatik kapatıldı',
+        body: 'Çıkış yapmayı unuttuğunuz için açık mesainiz sistem tarafından kapatıldı. Hatalıysa yöneticinize bildirin.',
+        url: '/clock'
+      }
+    })));
+  }
+
   const { data: companies } = await admin
     .from('companies').select('id, name').eq('is_active', true);
 

@@ -37,6 +37,7 @@ export default async function UsersPage() {
       email: u.email ?? '',
       role: u.role,
       is_active: u.is_active,
+      leave_allowance: u.leave_allowance ?? 14,
       memberIds: mine.filter((m: any) => !m.is_manager).map((m: any) => m.department_id),
       managerIds: mine.filter((m: any) => m.is_manager).map((m: any) => m.department_id)
     };

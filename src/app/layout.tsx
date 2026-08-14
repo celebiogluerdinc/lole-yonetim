@@ -4,7 +4,9 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'Lole Yönetim',
   description: 'Çok şirketli personel ve görev yönetimi',
-  manifest: '/manifest.json'
+  manifest: '/manifest.json',
+  appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Lole' },
+  icons: { apple: '/icons/icon-192.png' }
 };
 
 export const viewport: Viewport = {

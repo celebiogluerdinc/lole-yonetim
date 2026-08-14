@@ -56,7 +56,8 @@ body {
 }
 
 .input {
-  @apply w-full rounded-xl px-3.5 py-2.5 text-[15px] outline-none border border-transparent transition-colors text-[#F2F2F7];
+  /* 16px: iOS Safari'nin input odaklanınca otomatik yakınlaştırmasını engeller */
+  @apply w-full rounded-xl px-3.5 py-2.5 text-[16px] outline-none border border-transparent transition-colors text-[#F2F2F7];
   background: rgba(118, 118, 128, 0.24);
 }
 .input::placeholder { color: rgba(235, 235, 245, 0.35); }
