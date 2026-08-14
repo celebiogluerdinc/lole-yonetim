@@ -1,6 +1,22 @@
-/* Lole Yönetim — service worker (Web Push) */
-self.addEventListener('install', () => self.skipWaiting());
+/* Lole Yönetim — service worker (Web Push + çevrimdışı sayfa) */
+const OFFLINE_CACHE = 'lole-offline-v1';
+
+self.addEventListener('install', (e) => {
+  e.waitUntil(
+    caches.open(OFFLINE_CACHE).then((c) => c.add('/offline.html')).then(() => self.skipWaiting())
+  );
+});
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+
+// sayfa gezinmelerinde: önce ağ, bağlantı yoksa çevrimdışı sayfası
+self.addEventListener('fetch', (event) => {
+  if (event.request.mode !== 'navigate') return;
+  event.respondWith(
+    fetch(event.request).catch(() =>
+      caches.open(OFFLINE_CACHE).then((c) => c.match('/offline.html'))
+    )
+  );
+});
 
 self.addEventListener('push', (event) => {
   let data = { title: 'Lole Yönetim', body: '', url: '/notifications' };
