@@ -136,6 +136,30 @@ export default function TaskBoard({
     ? new Date(iso).toLocaleString('tr-TR', { timeZone: TZ, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : '—';
 
+  /** filtrelenmiş listeyi Excel'in açabildiği CSV olarak indir */
+  function exportCsv() {
+    const esc = (s: string) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+    const head = ['Görev', 'Durum', 'Bitiş', 'Departman', 'Atananlar', 'İlerleme'];
+    const lines = [head.map(esc).join(';')];
+    for (const r of filtered) {
+      lines.push([
+        r.title,
+        BADGE[effRow(r)]?.label ?? effRow(r),
+        fmtDue(r.due_at),
+        r.department ?? '',
+        r.assignees.join(', '),
+        r.progress ? `${r.progress.done}/${r.progress.total}` : ''
+      ].map(esc).join(';'));
+    }
+    // BOM → Excel'de Türkçe karakterler doğru açılır
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `gorevler-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   const printTable: PrintTable = useMemo(() => {
     const filterLabel = FILTERS.find(f => f.key === filter)?.label ?? '';
     const deptLabel = dept ? (departments.find(d => d.id === dept)?.name ?? '') : 'Tüm departmanlar';
@@ -167,6 +191,9 @@ export default function TaskBoard({
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <button onClick={exportCsv} className="btn-ghost text-sm" title="Filtrelenmiş listeyi Excel (CSV) olarak indir">
+            ⬇ CSV
+          </button>
           <PrintButton table={printTable} label="PDF" />
           <Link href="/manage/tasks/new" className="btn-primary">
             <Plus size={16} /> Yeni Görev
@@ -191,7 +218,7 @@ export default function TaskBoard({
           >
             {f.label}
             <span className={`text-[11px] rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center ${
-              filter === f.key ? 'bg-[#1C1C1E]/25' : 'bg-[#1C1C1E]/[0.10]'}`}>
+              filter === f.key ? 'bg-white/25' : 'bg-white/10'}`}>
               {counts[f.key] ?? 0}
             </span>
           </button>
@@ -229,7 +256,7 @@ export default function TaskBoard({
           const overdue = e === 'overdue';
           return (
             <Link key={r.id} href={`/tasks/${r.id}`}
-              className="flex items-center gap-3 px-4 py-3 hover:bg-[#1C1C1E]/[0.04] transition-colors">
+              className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <p className={`text-[15px] font-medium truncate ${e === 'completed' ? 'line-through text-[#AEAEB2]' : ''}`}>
@@ -249,7 +276,7 @@ export default function TaskBoard({
                 </p>
                 {r.progress && (
                   <div className="flex items-center gap-2 mt-1.5">
-                    <div className="h-[5px] w-32 rounded-full bg-[#1C1C1E]/[0.12] overflow-hidden">
+                    <div className="h-[5px] w-32 rounded-full bg-white/[0.12] overflow-hidden">
                       <div className="h-full bg-ios-blue rounded-full"
                         style={{ width: `${(r.progress.done / r.progress.total) * 100}%` }} />
                     </div>

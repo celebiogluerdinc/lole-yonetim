@@ -9,6 +9,7 @@ import { ROLE_LABEL } from '@/lib/utils';
 interface Dept { id: string; name: string; }
 export interface ManagedUser {
   id: string; full_name: string; email: string; role: string; is_active: boolean;
+  leave_allowance?: number;
   memberIds: string[];    // departments the user belongs to
   managerIds: string[];   // departments the user manages
 }
@@ -91,6 +92,12 @@ export default function UserManage({
                 </p>
               )}
             </div>
+          </div>
+
+          <div>
+            <label className="label">🏖 Yıllık izin hakkı (gün/yıl)</label>
+            <input name="leave_allowance" type="number" min={0} max={90}
+              defaultValue={user.leave_allowance ?? 14} className="input sm:max-w-[160px]" />
           </div>
 
           <div>

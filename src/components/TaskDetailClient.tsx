@@ -211,7 +211,7 @@ export default function TaskDetailClient({
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
             {attachments.map(a => (
               <a key={a.id} href={a.url} target="_blank" rel="noreferrer"
-                 className={`relative block rounded-xl overflow-hidden border bg-[#1C1C1E]/[0.06] aspect-square ${
+                 className={`relative block rounded-xl overflow-hidden border bg-white/[0.06] aspect-square ${
                    canReview && a.ai_verdict === 'suspicious' ? 'border-amber-400 ring-2 ring-amber-500/40' : 'border-white/10'}`}>
                 {a.mime_type?.startsWith('image/') && a.url ? (
                   // eslint-disable-next-line @next/next/no-img-element

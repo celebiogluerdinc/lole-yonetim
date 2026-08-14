@@ -24,8 +24,11 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 const fd = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' });
 
 export default function LeaveClient({
-  requests, meId, isManager
-}: { requests: Req[]; meId: string; isManager: boolean }) {
+  requests, meId, isManager, allowance = 14, usedDays = 0, year
+}: {
+  requests: Req[]; meId: string; isManager: boolean;
+  allowance?: number; usedDays?: number; year?: number;
+}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rejectId, setRejectId] = useState<string | null>(null);
@@ -55,6 +58,28 @@ export default function LeaveClient({
       </header>
 
       {error && <p className="text-[13px] text-ios-red bg-rose-500/10 rounded-xl px-3 py-2">{error}</p>}
+
+      {/* yıllık izin bakiyesi */}
+      <div className="card p-4">
+        <div className="flex items-baseline justify-between mb-2">
+          <p className="text-[14px] font-semibold">🏖 {year} Yıllık İzin Bakiyeniz</p>
+          <p className="text-[14px]">
+            <b className={allowance - usedDays <= 2 ? 'text-ios-red' : 'text-emerald-300'}>
+              {Math.max(0, allowance - usedDays)} gün kaldı
+            </b>
+            <span className="text-[12px] text-[#8E8E93]"> · {usedDays}/{allowance} kullanıldı</span>
+          </p>
+        </div>
+        <div className="h-[8px] rounded-full bg-white/[0.10] overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${usedDays >= allowance ? 'bg-ios-red' : 'bg-ios-blue'}`}
+            style={{ width: `${Math.min(100, (usedDays / Math.max(allowance, 1)) * 100)}%` }}
+          />
+        </div>
+        <p className="text-[11px] text-[#AEAEB2] mt-1.5">
+          Yalnızca onaylanan &quot;Yıllık izin&quot; günleri sayılır. İzin hakkınızı yöneticiniz Kullanıcılar sayfasından ayarlar.
+        </p>
+      </div>
 
       {open && (
         <form

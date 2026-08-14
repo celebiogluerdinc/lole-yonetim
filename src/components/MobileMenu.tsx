@@ -23,7 +23,18 @@ export default function MobileMenu({
         className="flex flex-col items-center gap-0.5 px-3 py-1 text-[#8E8E93]"
         aria-label="Menü"
       >
-        <Menu size={22} />
+        <span className="relative">
+          <Menu size={22} />
+          {/* alt barda görünmeyen sekmelerin rozet toplamı */}
+          {(() => {
+            const rest = items.slice(4).reduce((a, n) => a + (n.badge || 0), 0);
+            return rest > 0 ? (
+              <span className="absolute -top-1 -right-2 min-w-[17px] h-[17px] px-1 rounded-full bg-ios-red text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                {rest > 99 ? '99+' : rest}
+              </span>
+            ) : null;
+          })()}
+        </span>
         <span className="text-[10px] font-medium">Menü</span>
       </button>
 

@@ -6,7 +6,7 @@ import {
   Home, Calendar, Megaphone, PlusSquare, LayoutTemplate,
   Users, Building2, Landmark, MessageCircle, Bell, BarChart3, Sparkles,
   CalendarClock, Plane, Clock, ClipboardList, Settings, UserCircle2,
-  ShoppingCart, Wallet, type LucideIcon
+  ShoppingCart, Wallet, Search, FolderOpen, type LucideIcon
 } from 'lucide-react';
 
 const META: Record<string, { Icon: LucideIcon; color: string }> = {
@@ -29,7 +29,9 @@ const META: Record<string, { Icon: LucideIcon; color: string }> = {
   landmark: { Icon: Landmark, color: '#FF9500' },
   profile: { Icon: UserCircle2, color: '#0A84FF' },
   cart: { Icon: ShoppingCart, color: '#FF9F0A' },
-  wallet: { Icon: Wallet, color: '#30D158' }
+  wallet: { Icon: Wallet, color: '#30D158' },
+  search: { Icon: Search, color: '#64D2FF' },
+  folder: { Icon: FolderOpen, color: '#30B0C7' }
 };
 
 export type IconName = keyof typeof META;

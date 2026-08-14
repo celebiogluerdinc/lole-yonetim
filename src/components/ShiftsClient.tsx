@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Trash2, X, Repeat } from 'lucide-react';
-import { addShift, deleteShift, deleteShiftSeries } from '@/app/(app)/hr/actions';
+import { addShift, deleteShift, deleteShiftSeries, copyPreviousWeekShifts } from '@/app/(app)/hr/actions';
 import PrintButton, { type PrintTable } from '@/components/PrintButton';
 import { useConfirm } from '@/components/ConfirmProvider';
 
@@ -57,19 +57,30 @@ export default function ShiftsClient({
     else { if (okText) setOk(okText); router.refresh(); }
   });
 
+  /** iyimser gizlenen vardiyaları hata durumunda geri getir */
+  const unhide = (ids: string[]) =>
+    setHidden(h => { const n = new Set(h); ids.forEach(i => n.delete(i)); return n; });
+
   function removeOne(s: ShiftRow) {
     setHidden(h => new Set(h).add(s.id));
-    run(() => deleteShift(s.id));
+    start(async () => {
+      setError(null); setOk(null);
+      const r = await deleteShift(s.id);
+      if (r?.error) { unhide([s.id]); setError(r.error); }
+      else router.refresh();
+    });
   }
   async function removeSeries(s: ShiftRow) {
     if (!s.series_id) return;
     if (!(await confirmS({ message: 'Bu tekrarlayan serinin TÜM vardiyaları silinsin mi?', danger: true }))) return;
-    setHidden(h => {
-      const n = new Set(h);
-      shifts.filter(x => x.series_id === s.series_id).forEach(x => n.add(x.id));
-      return n;
+    const ids = shifts.filter(x => x.series_id === s.series_id).map(x => x.id);
+    setHidden(h => { const n = new Set(h); ids.forEach(i => n.add(i)); return n; });
+    start(async () => {
+      setError(null); setOk(null);
+      const r = await deleteShiftSeries(s.series_id!);
+      if (r?.error) { unhide(ids); setError(r.error); }
+      else { setOk('Seri silindi.'); router.refresh(); }
     });
-    run(() => deleteShiftSeries(s.series_id!), 'Seri silindi.');
   }
 
   const deptPeople = useMemo(() => {
@@ -124,7 +135,7 @@ export default function ShiftsClient({
       )}
       {s.note && <p className="text-[10px] text-[#8E8E93] truncate">{s.note}</p>}
       {isManager && (
-        <span className="absolute -top-1.5 -right-1.5 hidden group-hover:flex gap-0.5">
+        <span className="absolute -top-1.5 -right-1.5 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
           <button title="Bu vardiyayı sil" onClick={() => removeOne(s)}
             className="w-[18px] h-[18px] rounded-full bg-ios-red text-white flex items-center justify-center">
             <X size={10} strokeWidth={3} />
@@ -149,6 +160,22 @@ export default function ShiftsClient({
         {isManager && !plannerOpen && (
           <button onClick={() => openPlanner()} className="btn-primary">
             <Plus size={16} /> Vardiya Planla
+          </button>
+        )}
+        {isManager && view === 'week' && (
+          <button
+            disabled={pending}
+            onClick={async () => {
+              if (!(await confirmS({
+                message: 'Geçen haftanın vardiya planı bu haftaya aynen kopyalansın mı?\n(Zaten planlı olanlar ve izinli günler atlanır.)',
+                okText: 'Kopyala'
+              }))) return;
+              run(() => copyPreviousWeekShifts(days[0]), 'Geçen haftanın planı kopyalandı.');
+            }}
+            className="btn-outline"
+            title="Geçen haftanın tüm vardiyalarını bu haftaya taşır"
+          >
+            <Repeat size={15} /> Geçen Haftayı Kopyala
           </button>
         )}
         <PrintButton table={printTable} />

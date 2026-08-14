@@ -165,7 +165,7 @@ export default function TemplateCard({
         <ul className="mt-3 space-y-1">
           {items.slice(0, 4).map(it => (
             <li key={it.id} className="text-sm text-[#8E8E93] flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#1C1C1E]/25 shrink-0" /> {it.title}
+              <span className="w-1.5 h-1.5 rounded-full bg-white/25 shrink-0" /> {it.title}
             </li>
           ))}
           {items.length > 4 && <li className="text-xs text-[#AEAEB2]">+{items.length - 4} madde daha</li>}

@@ -8,12 +8,13 @@ import { clockIn, clockOut } from '@/app/(app)/hr/actions';
 
 interface Row { id: string; day: string; in: string; out: string | null; hours: number | null; method: string; }
 interface TeamRow { id: string; name: string; in: string; out: string | null; method: string; }
+interface AttRow { name: string; shift: string; status: 'ontime' | 'late' | 'absent'; lateMin: number; }
 
 export default function ClockClient({
-  open, viaQr, rows, weekTotal, team, isManager, isAdmin
+  open, viaQr, rows, weekTotal, team, attendance = [], isManager, isAdmin
 }: {
   open: { since: string } | null; viaQr: boolean; rows: Row[];
-  weekTotal: number; team: TeamRow[]; isManager: boolean; isAdmin: boolean;
+  weekTotal: number; team: TeamRow[]; attendance?: AttRow[]; isManager: boolean; isAdmin: boolean;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -102,6 +103,27 @@ export default function ClockClient({
       </section>
 
       {/* Team today (managers) */}
+      {/* bugünün vardiya yoklaması — geç kalan / gelmeyen */}
+      {isManager && attendance.length > 0 && (
+        <section>
+          <h2 className="section-title">Bugünün Vardiya Yoklaması</h2>
+          <div className="card divide-y divide-white/[0.08] overflow-hidden">
+            {attendance.map((a, i) => (
+              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                <span className="flex-1 text-[14px] font-medium truncate">{a.name}</span>
+                <span className="text-[12px] text-[#8E8E93]">{a.shift}</span>
+                {a.status === 'ontime' && <span className="badge bg-emerald-500/20 text-emerald-300">✓ Zamanında</span>}
+                {a.status === 'late' && <span className="badge bg-amber-500/20 text-amber-300">⏰ Geç (+{a.lateMin}dk)</span>}
+                {a.status === 'absent' && <span className="badge bg-rose-500/20 text-rose-300">✗ Giriş yok</span>}
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-[#AEAEB2] mt-1.5 px-1">
+            Başlamış vardiyalar, mesai girişleriyle karşılaştırılır (5 dk tolerans).
+          </p>
+        </section>
+      )}
+
       {isManager && (
         <section>
           <h2 className="section-title">Bugün Ekip</h2>

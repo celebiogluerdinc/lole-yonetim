@@ -83,7 +83,7 @@ export default function PushSetup() {
   }
 
   return (
-    <button onClick={enable} className="card p-4 w-full flex items-center gap-3 text-left hover:bg-[#1C1C1E]/[0.04] transition-colors">
+    <button onClick={enable} className="card p-4 w-full flex items-center gap-3 text-left hover:bg-white/[0.04] transition-colors">
       <span className="smart-icon !w-9 !h-9 shrink-0" style={{ backgroundColor: '#FF3B30' }}>
         <BellRing size={17} />
       </span>

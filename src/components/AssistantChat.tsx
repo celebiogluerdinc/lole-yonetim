@@ -42,7 +42,7 @@ export default function AssistantChat({ messages, userName }: { messages: Msg[];
   }
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-4.5rem)] md:h-dvh max-w-3xl mx-auto w-full">
+    <div className="flex flex-col h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))] md:h-dvh max-w-3xl mx-auto w-full">
       {/* Header */}
       <header className="flex items-center gap-3 px-4 py-3 bg-black/80 backdrop-blur sticky top-0 z-10 border-b border-white/[0.08]">
         <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#5E5CE6] to-[#AF52DE] text-white flex items-center justify-center shrink-0">
@@ -73,7 +73,7 @@ export default function AssistantChat({ messages, userName }: { messages: Msg[];
             <div className="flex flex-col gap-2 max-w-sm mx-auto pt-2">
               {SUGGESTIONS.map(s => (
                 <button key={s} onClick={() => ask(s)}
-                  className="card px-4 py-2.5 text-[14px] text-ios-blue text-left hover:bg-[#1C1C1E]/[0.04] transition-colors">
+                  className="card px-4 py-2.5 text-[14px] text-ios-blue text-left hover:bg-white/[0.04] transition-colors">
                   {s}
                 </button>
               ))}

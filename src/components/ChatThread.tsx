@@ -120,7 +120,7 @@ export default function ChatThread({
   }
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-4.5rem)] md:h-dvh max-w-3xl mx-auto w-full">
+    <div className="flex flex-col h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))] md:h-dvh max-w-3xl mx-auto w-full">
       {/* Header */}
       <header className="flex items-center gap-2 px-3 py-2.5 bg-black/80 backdrop-blur sticky top-0 z-10 border-b border-white/[0.08]">
         <Link href="/messages" className="flex items-center text-ios-blue text-[16px] -ml-1">
