@@ -1,41 +1,45 @@
-/* C7: PWA asgari service worker — YALNIZCA uygulama kabuğu (statik dosyalar).
-   Veri istekleri (Supabase, /api/*) ASLA önbelleğe alınmaz ve kuyruklanmaz (bkz. plan D1):
-   offline yazma kuyruğu bilinçli olarak YOKTUR — çakışma penceresini büyütür. */
-const CACHE = 'lole-shell-v2'; // v14-S3: sürüm artırıldı — eski önbellek activate'te temizlenir
-/* v14-S3: eskiden yalnız manifest+ikonlar vardı; uygulamanın kendisi (/ ve /engine.js)
-   önbellekte olmadığı için "standalone" PWA çevrimdışı açıldığında boş ekran veriyordu. */
-const SHELL = ['/', '/engine.js', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+/* Lole Yönetim — service worker (Web Push + çevrimdışı sayfa) */
+const OFFLINE_CACHE = 'lole-offline-v1';
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+    caches.open(OFFLINE_CACHE).then((c) => c.add('/offline.html')).then(() => self.skipWaiting())
   );
-  self.clients.claim();
+});
+self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+
+// sayfa gezinmelerinde: önce ağ, bağlantı yoksa çevrimdışı sayfası
+self.addEventListener('fetch', (event) => {
+  if (event.request.mode !== 'navigate') return;
+  event.respondWith(
+    fetch(event.request).catch(() =>
+      caches.open(OFFLINE_CACHE).then((c) => c.match('/offline.html'))
+    )
+  );
 });
 
-self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-  if (e.request.method !== 'GET') return; // yazmalar her zaman ağa gider
-  if (url.origin !== self.location.origin) return; // Supabase/Anthropic vb. dokunulmaz
-  if (url.pathname.startsWith('/api/')) return; // API her zaman ağdan
-  // yalnızca kabuk dosyaları: cache-first; diğer her şey ağ (başarısızsa cache'e bakılır)
-  if (SHELL.indexOf(url.pathname) !== -1) {
-    // stale-while-revalidate: anında cache'ten aç, arka planda tazele (engine.js güncellemesi bir sonraki açılışta gelir)
-    e.respondWith(
-      caches.match(e.request).then((r) => {
-        const net = fetch(e.request)
-          .then((resp) => {
-            if (resp && resp.ok) caches.open(CACHE).then((c) => c.put(e.request, resp.clone())).catch(() => {});
-            return resp;
-          })
-          .catch(() => r);
-        return r || net;
-      })
-    );
-  }
+self.addEventListener('push', (event) => {
+  let data = { title: 'Lole Yönetim', body: '', url: '/notifications' };
+  try { data = { ...data, ...event.data.json() }; } catch {}
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      data: { url: data.url }
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || '/notifications';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ('focus' in c) { c.navigate(url); return c.focus(); }
+      }
+      return self.clients.openWindow(url);
+    })
+  );
 });
