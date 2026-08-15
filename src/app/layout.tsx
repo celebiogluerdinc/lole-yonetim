@@ -2,24 +2,21 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'LOLE Finans & Muhasebe',
-  description: 'LOLE Grup — Finans & Muhasebe Yönetim Sistemi',
+  title: 'Lole Yönetim',
+  description: 'Çok şirketli personel ve görev yönetimi',
   manifest: '/manifest.json',
-  appleWebApp: { capable: true, title: 'LOLE', statusBarStyle: 'black-translucent' },
+  appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Lole' },
+  icons: { apple: '/icons/icon-192.png' }
 };
 
 export const viewport: Viewport = {
+  themeColor: '#1C1C1E',
   width: 'device-width',
   initialScale: 1,
-  // C6 (WCAG 1.4.4): maximumScale/userScalable kaldırıldı — kullanıcı yakınlaştırma engellenmez
-  themeColor: '#0c1322',
+  viewportFit: 'cover' // iOS: enables env(safe-area-inset-*) under the home indicator
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="tr">
       <body>{children}</body>

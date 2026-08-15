@@ -1,149 +1,51 @@
-'use client';
+import { login } from './actions';
+import { supabaseServer } from '@/lib/supabase/server';
+import SubmitButton from '@/components/SubmitButton';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { getSupabase } from '@/lib/supabaseClient';
-
-export default function LoginPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [pw, setPw] = useState('');
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [checking, setChecking] = useState(true);
-
-  useEffect(() => {
-    const sb = getSupabase();
-    sb.auth.getSession().then(({ data }) => {
-      if (data.session) router.replace('/');
-      else setChecking(false);
-    });
-  }, [router]);
-
-  async function signIn() {
-    setErr('');
-    if (!email.trim() || !pw) {
-      setErr('E-posta ve şifre gerekli.');
-      return;
-    }
-    setBusy(true);
-    try {
-      const sb = getSupabase();
-      const timeout = new Promise<never>((_, rej) =>
-        setTimeout(
-          () =>
-            rej(
-              new Error(
-                'Sunucuya ulaşılamadı. İnternet bağlantınızı ve Supabase URL/anahtar ayarlarını kontrol edin.'
-              )
-            ),
-          25000
-        )
-      );
-      const { error } = await Promise.race([
-        sb.auth.signInWithPassword({ email: email.trim(), password: pw }),
-        timeout,
-      ]);
-      if (error) {
-        setErr(
-          error.message.toLowerCase().includes('invalid')
-            ? 'E-posta veya şifre hatalı.'
-            : error.message
-        );
-        setBusy(false);
-        return;
-      }
-      router.replace('/');
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Giriş sırasında bir hata oluştu.');
-      setBusy(false);
-    }
-  }
-
+export default async function LoginPage({
+  searchParams
+}: {
+  searchParams: { error?: string };
+}) {
+  let appName = 'Lole Yönetim';
+  try {
+    const { data } = await supabaseServer()
+      .from('app_settings').select('value').eq('key', 'app_name').maybeSingle();
+    if (data?.value) appName = data.value;
+  } catch { /* tablo henüz yoksa varsayılan ad */ }
   return (
-    <div
-      style={{
-        minHeight: '100dvh',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 34,
-        padding: '44px 20px',
-        background:
-          'radial-gradient(900px 500px at 50% -10%,#1d2c4d 0%,#0c1322 55%) #0c1322',
-        color: '#eef1f7',
-      }}
-    >
-      <div className="brand" style={{ textAlign: 'center' }}>
-        <div
-          className="logo"
-          style={{
-            fontSize: 34,
-            fontWeight: 800,
-            letterSpacing: '.34em',
-            textIndent: '.34em',
-            color: '#e3b578',
-          }}
-        >
-          LOLE
+    <main className="min-h-dvh flex items-center justify-center p-6">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="mx-auto w-14 h-14 rounded-2xl bg-brand-500 text-white flex items-center justify-center text-2xl font-bold shadow-lg shadow-black/40">
+            {appName[0]?.toUpperCase() ?? 'L'}
+          </div>
+          <h1 className="mt-4 text-2xl font-bold tracking-tight">{appName}</h1>
+          <p className="text-sm text-[#8E8E93] mt-1">Hesabınızla giriş yapın</p>
         </div>
-        <div className="sub" style={{ color: '#aab4c9', marginTop: 6, fontSize: 13 }}>
-          Finans &amp; Muhasebe Yönetim Sistemi
-        </div>
-      </div>
 
-      <div className="loginBox">
-        <h2>Giriş Yap</h2>
-        <p className="tiny" style={{ color: '#aab4c9', marginBottom: 14 }}>
-          E-posta ve şifrenizle giriş yapın
+        <form action={login} className="card p-6 space-y-4">
+          <div>
+            <label className="label" htmlFor="email">Kullanıcı adı veya e-posta</label>
+            <input id="email" name="email" type="text" autoCapitalize="none" autoComplete="username"
+              required className="input" placeholder="ayse.yilmaz" />
+          </div>
+          <div>
+            <label className="label" htmlFor="password">Parola</label>
+            <input id="password" name="password" type="password" required className="input" placeholder="••••••••" />
+          </div>
+          {searchParams.error && (
+            <p className="text-sm text-rose-300 bg-rose-500/10 rounded-xl px-3 py-2">
+              Kullanıcı adı veya parola hatalı. Lütfen tekrar deneyin.
+            </p>
+          )}
+          <SubmitButton pendingText="Giriş yapılıyor…">Giriş Yap</SubmitButton>
+        </form>
+
+        <p className="text-center text-xs text-[#8E8E93] mt-6">
+          Hesabınız yoksa şirket yöneticinizle iletişime geçin.
         </p>
-        {checking ? (
-          <p className="tiny" style={{ color: '#aab4c9' }}>Kontrol ediliyor…</p>
-        ) : (
-          <>
-            <input
-              type="email"
-              placeholder="E-posta"
-              autoComplete="username"
-              autoCapitalize="off"
-              spellCheck={false}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && signIn()}
-            />
-            <input
-              type="password"
-              placeholder="Şifre"
-              autoComplete="current-password"
-              style={{ marginTop: 10 }}
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && signIn()}
-            />
-            {err && (
-              <p
-                style={{
-                  color: '#ff9a90',
-                  fontSize: 12.5,
-                  marginTop: 10,
-                  textAlign: 'left',
-                }}
-              >
-                {err}
-              </p>
-            )}
-            <button
-              className="btn"
-              style={{ width: '100%', justifyContent: 'center', marginTop: 16 }}
-              onClick={signIn}
-              disabled={busy}
-            >
-              {busy ? 'Giriş yapılıyor…' : 'Giriş Yap →'}
-            </button>
-          </>
-        )}
       </div>
-    </div>
+    </main>
   );
 }
