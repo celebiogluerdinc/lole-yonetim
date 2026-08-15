@@ -1,13 +1,14 @@
 {
-  "name": "Lole Yönetim",
-  "short_name": "Lole",
-  "description": "Çok şirketli personel ve görev yönetimi",
-  "start_url": "/home",
+  "name": "LOLE Finans & Muhasebe",
+  "short_name": "LOLE",
+  "description": "LOLE Grup — Finans & Muhasebe Yönetim Sistemi",
+  "start_url": "/",
   "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#1C1C1E",
+  "background_color": "#0c1322",
+  "theme_color": "#0c1322",
+  "lang": "tr",
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }

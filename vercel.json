@@ -1,3 +1,8 @@
 {
-  "regions": ["fra1"]
+  "crons": [
+    {
+      "path": "/api/weekly-backup",
+      "schedule": "0 6 * * 1"
+    }
+  ]
 }
