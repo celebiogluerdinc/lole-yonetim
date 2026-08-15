@@ -1,116 +1,86 @@
-# LOLE Finans & Muhasebe — Next.js + Supabase
+# Lole Yönetim
 
-Bu proje, tek dosyalık Claude uygulamanızın (`LOLE-Finans-Muhasebe.html`) gerçek bir
-web uygulamasına (Next.js) taşınmış hâlidir. Veriler artık **kendi Supabase
-projenizde** saklanır ve Vercel üzerinden sabit bir adreste yayınlanır.
+Çok şirketli personel & görev yönetimi uygulaması — **Faz 1 (çekirdek)**.
 
-## Ne yapıldı? (Faz A tamamlandı)
+Lole Fabrika · Lole Restaurant · Lole Patisserie · Lole Pazarlama — her şirket izole bir tenant;
+Postgres **Row Level Security** ile yetkiler veritabanı katmanında zorlanır.
 
-Uygulamanın kanıtlanmış 16 modülünün **tamamı** birebir korunmuştur:
-Ana Sayfa, AI Asistan, Banka & Kasa, Gelir-Gider, POS, Kredi Kartları, Cari,
-Personel & Maaş, Sabit Ödemeler, Çek & Senet, Stok, Demirbaş, Bütçe, Raporlar,
-Görev & Duyuru, Ayarlar.
+## Bu sürümde neler var (Faz 1)
 
-Sadece **3 altyapı dikişi** yeni sisteme bağlandı:
+- ✅ Giriş / oturum (Supabase Auth) + rol bazlı arayüz (süper admin, admin, müdür, personel)
+- ✅ **Ana Sayfa** — Apple Anımsatıcılar tarzı: Bugün / Yaklaşan / Gecikmiş / Öncelikli / Tamamlanan sekmeleri, ilerleme çubuğu, tik atarak tamamlama, kişisel notlar, Pano önizlemesi
+- ✅ **Görev detayı** — checklist maddeleri, fotoğraf/dosya ekleme (zorunlu fotoğraf kapısı), notlar, **Engel Bildir**, **yönetici Onayla/Reddet** akışı
+- ✅ **Görev oluşturma** — kişi/departmana atama, tarih-saat, öncelik, **Günlük/Haftalık/Aylık/Özel tekrarlama** (RRULE, örnekler önceden üretilir)
+- ✅ **Şablonlar** — checklist şablonu oluştur, tek dokunuşla görev olarak ata
+- ✅ **Takvim/Ajanda** — aylık ajanda görünümü, müdürler için ekip takvimi
+- ✅ **Pano & Duyurular** — şirket geneli / departman duyuruları, sabitleme, okundu takibi
+- ✅ **Admin paneli** — sınırsız kullanıcı ekleme, departman ekleme (4 hazır departman otomatik)
+- ✅ **Süper admin** — yeni şirket ekleme, şirketler arası geçiş (tam yetki)
+- ✅ Denetim izi (activity_log) + uygulama içi bildirim kayıtları
+- ✅ Tam veritabanı şeması: **mesajlaşma, push ve AI tabloları dahil** (Faz 2–3'te arayüzü eklenecek)
 
-1. **Depolama** — Uygulama tüm veriyi `window.storage` adında basit bir
-   anahtar-değer arabirimi üzerinden saklıyordu. Bu arabirim artık Supabase'teki
-   `kv_store` tablosuna bağlandı (`src/lib/storageShim.ts`). İş mantığının 3500
-   satırına hiç dokunulmadı — bu yüzden davranış birebir aynı, ama veri sizin
-   Supabase'inizde.
-2. **Giriş** — Özel kullanıcı adı/şifre yerine **Supabase Auth** (e-posta/şifre).
-   Giriş yapan kişi otomatik olarak uygulama içi profiline bağlanır.
-3. **Çıkış** — Supabase oturumunu kapatır ve giriş ekranına döner.
+Sonraki fazlar: mesajlaşma arayüzü, web push, performans panoları, Lole Asistan (AI ajanları).
 
-> Mimari not: Uygulama, verinin tamamını tek bir JSON belgesi olarak `kv_store`
-> içinde tutar (orijinal sürümle birebir aynı yaklaşım). Şirket bazlı erişim,
-> uygulama içindeki rol/şirket yetkileriyle yönetilir. İleride her tabloyu ayrı
-> ayrı normalize edip satır-düzeyi (RLS) güvenliğe geçmek isterseniz, Faz 2
-> olarak `supabase/schema.sql` içindeki ilişkisel şema hazır bekliyor.
+## Kurulum (≈15 dakika)
 
----
+### 1. Supabase projesi
+1. [supabase.com](https://supabase.com) → **New project** (bölge: Frankfurt önerilir).
+2. **SQL Editor**'de sırayla çalıştırın:
+   - `supabase/migrations/0001_schema.sql`
+   - `supabase/migrations/0002_rls.sql`
+3. **Project Settings → API**'den `URL`, `anon key` ve `service_role key` değerlerini alın.
 
-## Kurulum — Adım Adım
-
-### 0) Gereksinim
-Node.js 18+ (bilgisayarınızda kuruluysa hazırsınız).
-
-### 1) Supabase tablosunu oluşturun (bir kez)
-Supabase panosunda **SQL Editor**'ü açın, `supabase/setup.sql` dosyasının
-içeriğini yapıştırıp **Run**'a basın. Bu, `kv_store` tablosunu ve güvenlik
-(RLS) politikasını ekler. (Faz B'de oluşturduğunuz tabloları silmez.)
-
-### 2) İlk kullanıcıyı (kendinizi) oluşturun
-Supabase panosu → **Authentication → Users → Add user** →
-- E-posta: `celebiogluerdinc@gmail.com`
-- Bir şifre belirleyin
-Bu e-posta ile giren kişi otomatik olarak **süper yönetici** olur (tüm şirketler).
-Diğer kullanıcıları hem buraya (Authentication → Users) hem de uygulama içindeki
-**Ayarlar → Kullanıcılar**'a ekleyip şirket erişimlerini oradan verirsiniz.
-
-### 3) Ortam değişkenleri
-`.env.local.example` dosyasını `.env.local` olarak kopyalayın. İçindeki iki değer
-zaten sizin projenize göre doldurulmuş:
-```
-NEXT_PUBLIC_SUPABASE_URL=https://ajskxcboewophuyxtswy.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
+### 2. Ortam değişkenleri
+```bash
+cp .env.example .env.local
+# .env.local dosyasını kendi değerlerinizle doldurun
 ```
 
-### 4) Yerelde çalıştırın
+### 3. Bağımlılıklar + seed
 ```bash
 npm install
-npm run dev
+npm run seed     # 4 Lole şirketi + kullanıcılar + örnek görevler
 ```
-Tarayıcıda `http://localhost:3000` → giriş ekranı → 2. adımdaki e-posta/şifre ile
-girin. Şirket seçim ekranını ve tüm modülleri göreceksiniz.
 
----
+Seed çıktısında giriş bilgileri yazdırılır (varsayılan parola: `Lole!2026`):
 
-## Yayınlama (Faz C + D)
+| Rol | E-posta |
+|---|---|
+| Süper Admin | `super@lole.app` |
+| Admin (Fabrika) | `admin@fabrika.lole.app` |
+| Müdür (Restaurant) | `mudur@restaurant.lole.app` |
+| Personel (Patisserie) | `personel1@patisserie.lole.app` |
 
-### GitHub'a koyma (Faz C)
-1. github.com → **New repository** → boş bir depo oluşturun (README eklemeyin).
-2. Bu klasörde:
-   ```bash
-   git init
-   git add .
-   git commit -m "LOLE Finans — Next.js + Supabase"
-   git branch -M main
-   git remote add origin <DEPO-ADRESİNİZ>
-   git push -u origin main
-   ```
-   > `.env.local` gizli olduğu için (`.gitignore`) GitHub'a **gitmez** — doğrusu budur.
+Diğer şirketler için aynı düzen: `admin@restaurant...`, `personel2@pazarlama...` vb.
 
-### Vercel'e bağlama (Faz D)
-1. vercel.com → **Add New → Project** → GitHub deponuzu **Import** edin.
-2. **Environment Variables** bölümüne şu ikisini girin (Vercel'de bunları elle
-   eklemeniz gerekir, çünkü `.env.local` gönderilmedi):
-   - `NEXT_PUBLIC_SUPABASE_URL` = `https://ajskxcboewophuyxtswy.supabase.co`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = `sb_publishable_...` (Supabase → Settings → API)
-3. **Deploy** → 1-2 dakika. Vercel size sabit bir adres verir (ör.
-   `lole-finans.vercel.app`) — bu adres bir daha değişmez.
-
----
-
-## Veri taşıma (Faz E — sonra)
-Mevcut Claude sürümündeki verinizi (Ayarlar → "Panoya Kopyala") aldıktan sonra,
-yeni uygulamada **Ayarlar → Yedekten Yükle** ile içeri aktarabilirsiniz — veri
-biçimi birebir aynıdır. Her şey doğrulanınca yeni sistem asıl kayıt sisteminiz olur.
-
-## Bilinen sınır
-- **AI Asistan**: Tarayıcıdan doğrudan Anthropic API'sine çağrı yaptığı için
-  yayında çalışmaz (bir sonraki adımda küçük bir sunucu-tarafı yönlendirme ile
-  eklenebilir). Diğer tüm finans/muhasebe işlevleri tam çalışır.
-
-## Proje yapısı
+### 4. Çalıştırma
+```bash
+npm run dev      # http://localhost:3000
 ```
-src/app/login/page.tsx     Supabase Auth giriş ekranı
-src/app/page.tsx           Oturum kontrolü + motoru yükleyen sayfa
-src/app/globals.css        Tasarım sistemi (orijinalden birebir)
-src/lib/supabaseClient.ts  Supabase tarayıcı istemcisi
-src/lib/storageShim.ts     window.storage -> Supabase kv_store köprüsü
-src/lib/loleShell.ts       Uygulama kabuğu (DOM)
-public/engine.js           İş mantığı motoru (16 modül) — orijinalden taşındı
-supabase/setup.sql         kv_store tablosu + RLS (ÇALIŞTIRIN)
-supabase/schema.sql        İlişkisel şema (Faz 2 için referans)
+
+### 5. Yayınlama (Vercel)
+Repo'yu Vercel'e bağlayın, üç env değişkenini ekleyin, deploy edin.
+`SUPABASE_SERVICE_ROLE_KEY` yalnızca sunucuda kullanılır — asla `NEXT_PUBLIC_` yapmayın.
+
+## Mimari özeti
+
+- **Next.js 14 App Router** + Server Actions (Zod doğrulamalı) + Tailwind
+- **Supabase**: Postgres + Auth + Storage (özel bucket, imzalı URL)
+- **RLS her tabloda**: personel yalnızca kendine atanan görevi görür/tamamlar; müdür yalnızca yönettiği departmanı; admin şirketini; süper admin her şeyi. Şirketler arası erişim veritabanı seviyesinde imkânsızdır.
+- Yeni şirket eklendiğinde **Operasyon, Satış, Üretim, Yönetim** departmanları DB trigger'ı ile otomatik oluşur.
+- Tekrarlayan görevler `rrule` ile oluşturma anında örneklenir (varsayılan 8, en fazla 30 örnek).
+
+## Klasör yapısı
 ```
+supabase/migrations/   Şema + RLS (versiyonlu SQL)
+scripts/seed.mjs       Demo veri (4 şirket, roller, görevler)
+src/app/(app)/         Uygulama sayfaları (home, tasks, manage, admin, super…)
+src/app/login/         Giriş
+src/components/        İstemci bileşenleri
+src/lib/               Supabase istemcileri, auth yardımcıları, tipler
+```
+
+## Bilinen sınırlar (Faz 1)
+- PWA manifest hazır; service worker / çevrimdışı destek Faz 2'de.
+- Bildirimler veritabanına yazılıyor; push gönderimi ve bildirim merkezi arayüzü Faz 2'de.
+- Mesajlaşma ve AI tabloları hazır; arayüzleri Faz 2–3'te.
