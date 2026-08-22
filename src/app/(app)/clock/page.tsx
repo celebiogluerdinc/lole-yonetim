@@ -34,9 +34,11 @@ export default async function ClockPage({
     supabase.from('time_entries').select('*')
       .eq('user_id', profile.id).is('clock_out', null)
       .order('clock_in', { ascending: false }).limit(1).maybeSingle(),
+    // mesai geçmişi silinmez: son 90 gün listelenir (haftalık toplam ayrıca hesaplanır)
     supabase.from('time_entries').select('*')
-      .eq('user_id', profile.id).gte('clock_in', weekAgo)
-      .order('clock_in', { ascending: false }).limit(30),
+      .eq('user_id', profile.id)
+      .gte('clock_in', new Date(Date.now() - 90 * 86400000).toISOString())
+      .order('clock_in', { ascending: false }).limit(500),
     isManager
       ? supabase.from('time_entries')
           .select('*, profiles:user_id(full_name)')
@@ -78,6 +80,7 @@ export default async function ClockPage({
     });
 
   const weekTotal = (myEntries ?? [])
+    .filter((e: any) => e.clock_in >= weekAgo) // "bu hafta" yalnız son 7 gün
     .reduce((a: number, e: any) => a + (hours(e.clock_in, e.clock_out) ?? 0), 0);
 
   const rows = (myEntries ?? []).map((e: any) => ({

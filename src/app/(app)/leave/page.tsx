@@ -17,7 +17,7 @@ export default async function LeavePage() {
     .select('*, profiles:user_id(full_name)')
     .eq('company_id', companyId)
     .order('created_at', { ascending: false })
-    .limit(100);
+    .limit(1000);
   if (!isManager) {
     q = q.eq('user_id', profile.id);
   } else if (!['super_admin', 'admin'].includes(profile.role)) {

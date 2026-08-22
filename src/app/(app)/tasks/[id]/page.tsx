@@ -16,7 +16,9 @@ export default async function TaskPage({ params }: { params: { id: string } }) {
 
   const [{ data: items }, { data: attachments }, { data: notes }, { data: assignees }, { data: dept }, { data: creator }] =
     await Promise.all([
-      supabase.from('checklist_items').select('*').eq('task_id', task.id).order('position'),
+      supabase.from('checklist_items')
+        .select('*, doneBy:done_by(full_name)')
+        .eq('task_id', task.id).order('position'),
       supabase.from('attachments').select('*').eq('task_id', task.id).order('created_at'),
       supabase.from('notes').select('*, profiles:author_id(full_name)').eq('task_id', task.id).order('created_at'),
       supabase.from('task_assignees').select('user_id, profiles:user_id(full_name)').eq('task_id', task.id),

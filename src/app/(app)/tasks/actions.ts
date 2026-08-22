@@ -165,13 +165,9 @@ export async function managerSetTaskStatus(taskId: string, status: 'completed' |
   const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).maybeSingle();
   if (!task) return { error: 'Görev bulunamadı.' };
 
-  // Adminler tam yetkilidir: hangi şirketten eklenmiş olurlarsa olsunlar TÜM
-  // şirketlerin görevlerini bitirebilir/iptal edebilir (migration 0012 ile
-  // veritabanı kuralları da adminleri süper admin kapsamında sayıyor).
-  // Müdürler yalnızca müdürü oldukları departmanların görevlerinde yetkilidir.
   const allowed =
     profile.role === 'super_admin' ||
-    profile.role === 'admin' ||
+    (profile.role === 'admin' && (!profile.company_id || task.company_id === profile.company_id)) ||
     (task.department_id && managedDepartmentIds.includes(task.department_id));
   if (!allowed) return { error: 'Bu görev üzerinde yetkiniz yok.' };
   if (['completed', 'cancelled'].includes(task.status) && task.status === status) return { ok: true };

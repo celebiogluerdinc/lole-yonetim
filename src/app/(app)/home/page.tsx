@@ -79,7 +79,7 @@ export default async function HomePage({
           .eq('company_id', companyId)
           .not('status', 'in', '("completed","cancelled")')
           .order('due_at', { ascending: true, nullsFirst: false })
-          .limit(200)
+          .limit(500)
       : Promise.resolve({ data: null } as any),
     companyId
       ? supabase
@@ -97,12 +97,15 @@ export default async function HomePage({
     if (t.due_at && new Date(t.due_at).getTime() < Date.now()) return 'overdue';
     return t.status;
   };
-  const flowCounts = { active: flowTasks.length, pending_review: 0, blocked: 0, overdue: 0 };
+  const istDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d);
+  const todayKeyIst = istDay(new Date());
+  const flowCounts = { active: flowTasks.length, today: 0, pending_review: 0, blocked: 0, overdue: 0 };
   for (const t of flowTasks) {
     const e = effStatus(t);
     if (e === 'pending_review') flowCounts.pending_review++;
     else if (e === 'blocked') flowCounts.blocked++;
     else if (e === 'overdue') flowCounts.overdue++;
+    if (t.due_at && istDay(new Date(t.due_at)) === todayKeyIst) flowCounts.today++;
   }
   const attention = flowTasks
     .map(t => ({ ...t, eff: effStatus(t) }))
@@ -185,6 +188,7 @@ export default async function HomePage({
   const todayTotal = myTasks.filter(t => isToday(t.due_at)).length;
 
   const FLOW_CHIPS = [
+    { key: 'today', label: 'Bugün (ekip)', count: flowCounts.today, color: '#34C759', Icon: CalendarDays },
     { key: 'active', label: 'Aktif İş', count: flowCounts.active, color: '#007AFF', Icon: Inbox },
     { key: 'pending_review', label: 'Onay Bekleyen', count: flowCounts.pending_review, color: '#FF9500', Icon: ShieldQuestion },
     { key: 'overdue', label: 'Geciken', count: flowCounts.overdue, color: '#FF3B30', Icon: AlertCircle },
@@ -221,7 +225,7 @@ export default async function HomePage({
             <h2 className="section-title">İş Akışı</h2>
             <Link href="/manage/tasks" className="text-[13px] text-ios-blue font-medium">Tümünü Gör</Link>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-3">
             {FLOW_CHIPS.map(c => (
               <Link key={c.key} href={`/manage/tasks?f=${c.key}`} className="smart-card">
                 <div className="flex items-center justify-between">

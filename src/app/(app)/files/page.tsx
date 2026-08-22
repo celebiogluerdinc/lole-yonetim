@@ -17,7 +17,7 @@ export default async function FilesPage() {
       .select('*, uploader:uploaded_by(full_name), departments:department_id(name)')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
-      .limit(300),
+      .limit(1000),
     supabase.from('departments').select('id, name').eq('company_id', companyId).order('name')
   ]);
 

@@ -26,7 +26,7 @@ export default async function AnnouncementsPage() {
       .select('*, profiles:author_id(full_name)')
       .eq('company_id', companyId)
       .order('created_at')
-      .limit(500)
+      .limit(2000)
   ]);
 
   const commentsByAnn: Record<string, AnnComment[]> = {};

@@ -19,7 +19,7 @@ export default async function PaymentsPage({
       .select('*, requester:requester_id(full_name), decider:decided_by(full_name), departments:department_id(name)')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false })
-      .limit(300),
+      .limit(1000),
     supabase.from('payment_templates')
       .select('*, creator:created_by(full_name), departments:department_id(name)')
       .eq('company_id', companyId)
