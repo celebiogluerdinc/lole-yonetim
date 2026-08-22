@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Plus, Search, Camera, ClipboardList, ShieldCheck, ChevronRight, Flag,
-  CheckCheck, Ban, ThumbsUp
+  CheckCheck, Ban, ThumbsUp, X
 } from 'lucide-react';
 import { TZ } from '@/lib/utils';
 import { managerSetTaskStatus, reviewTask } from '@/app/(app)/tasks/actions';
@@ -18,6 +18,7 @@ interface Row {
   due_at: string | null; department_id: string | null; department: string | null;
   assignees: string[]; progress: { done: number; total: number } | null;
   requires_photo: boolean; requires_approval: boolean; blocked_reason: string | null;
+  completed_at?: string | null;
 }
 
 const FILTERS = [
@@ -58,10 +59,27 @@ function isTodayRow(r: Row): boolean {
 const tr = (s: string) => s.toLocaleLowerCase('tr-TR');
 
 export default function TaskBoard({
-  rows, departments, initialFilter = 'active'
-}: { rows: Row[]; departments: { id: string; name: string }[]; initialFilter?: string }) {
+  rows, departments, initialFilter = 'active',
+  from = null, to = null, pages = 1, hasMoreHistory = false, historyTotal = 0
+}: {
+  rows: Row[]; departments: { id: string; name: string }[]; initialFilter?: string;
+  from?: string | null; to?: string | null; pages?: number;
+  hasMoreHistory?: boolean; historyTotal?: number;
+}) {
   const router = useRouter();
   const confirmS = useConfirm();
+  const [fromDate, setFromDate] = useState(from ?? '');
+  const [toDate, setToDate] = useState(to ?? '');
+
+  /** tarih aralığı sunucu tarafında uygulanır — geçmişin tamamına erişilir */
+  const applyRange = (f: string, t: string, page = 1) => {
+    const p = new URLSearchParams();
+    if (filter) p.set('f', filter);
+    if (f) p.set('from', f);
+    if (t) p.set('to', t);
+    if (page > 1) p.set('sayfa', String(page));
+    router.push(`/manage/tasks?${p.toString()}`);
+  };
   const [, startBg] = useTransition();
   const [filter, setFilter] = useState<string>(
     FILTERS.some(f => f.key === initialFilter) ? initialFilter : 'active'
@@ -187,7 +205,7 @@ export default function TaskBoard({
           <h1 className="text-[28px] leading-tight font-bold tracking-tight">Görevler</h1>
           <p className="text-[14px] text-[#8E8E93] flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-ios-green animate-pulse inline-block" />
-            Canlı takip · {counts.active} aktif / {rows.length} toplam
+            Canlı takip · {counts.active} aktif · bugün {counts.today} · tamamlanan {counts.completed ?? 0}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -242,6 +260,51 @@ export default function TaskBoard({
         </select>
       </div>
 
+      {/* Geçmişe erişim — hiçbir kayıt silinmez, tarih aralığıyla tamamına ulaşılır */}
+      <div className="flex flex-wrap items-end gap-2">
+        <div>
+          <label className="label">Başlangıç tarihi</label>
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="input !py-2" />
+        </div>
+        <div>
+          <label className="label">Bitiş tarihi</label>
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="input !py-2" />
+        </div>
+        <button
+          onClick={() => applyRange(fromDate, toDate)}
+          disabled={!fromDate && !toDate}
+          className="btn-outline text-sm"
+        >
+          Aralığı Getir
+        </button>
+        {(from || to) && (
+          <button onClick={() => { setFromDate(''); setToDate(''); applyRange('', ''); }}
+            className="btn-ghost text-sm">
+            <X size={14} /> Aralığı Temizle
+          </button>
+        )}
+        <span className="text-[12px] text-[#8E8E93] pb-2.5">
+          {from || to
+            ? `Seçili dönem · ${rows.length} kayıt`
+            : `Tüm aktif görevler + son ${historyTotal > 0 ? Math.min(rows.length, historyTotal) : 0} tamamlanan gösteriliyor`}
+        </span>
+      </div>
+
+      {hasMoreHistory && (
+        <div className="card p-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[13px] text-[#8E8E93]">
+            📚 Arşivde toplam <b className="text-[#D1D1D6]">{historyTotal}</b> tamamlanmış/iptal kayıt var —
+            hiçbiri silinmedi. Daha eskisini görmek için yükleyin veya tarih aralığı seçin.
+          </p>
+          <button
+            onClick={() => applyRange(fromDate, toDate, pages + 1)}
+            className="btn-outline text-sm shrink-0"
+          >
+            ⬇ Daha Eskiyi Yükle
+          </button>
+        </div>
+      )}
+
       {/* List */}
       <div className="card divide-y divide-white/[0.08] overflow-hidden">
         {filtered.length === 0 && (
@@ -273,6 +336,9 @@ export default function TaskBoard({
                   <span className={overdue ? 'text-ios-red font-medium' : ''}>{fmtDue(r.due_at)}</span>
                   {r.department ? ` · ${r.department}` : ''}
                   {r.assignees.length ? ` · 👤 ${r.assignees.join(', ')}` : ' · Atanmamış'}
+                  {r.completed_at && (
+                    <span className="text-emerald-300 font-medium"> · ✓ {fmtDue(r.completed_at)} işaretlendi</span>
+                  )}
                 </p>
                 {r.progress && (
                   <div className="flex items-center gap-2 mt-1.5">

@@ -130,7 +130,10 @@ export default function TaskDetailClient({
               <div className="flex-1 min-w-0">
                 <p className={`text-sm ${itemDone(item) ? 'line-through text-[#AEAEB2]' : ''}`}>{item.title}</p>
                 {item.is_done && item.done_at && (
-                  <p className="text-[11px] text-[#AEAEB2]">{fmtDate(item.done_at)}</p>
+                  <p className="text-[11px] text-emerald-300">
+                    ✓ {(item as any).doneBy?.full_name ? `${(item as any).doneBy.full_name} · ` : ''}
+                    {fmtDate(item.done_at)}
+                  </p>
                 )}
               </div>
               {item.requires_photo && (
