@@ -6,7 +6,7 @@ import UserManage, { type ManagedUser } from '@/components/UserManage';
 export const dynamic = 'force-dynamic';
 
 export default async function UsersPage() {
-  const { supabase, profile, companyId } = await getCtx();
+  const { supabase, profile, companyId, isOrderLine } = await getCtx();
   if (!['super_admin', 'admin'].includes(profile.role)) redirect('/home');
   if (!companyId) redirect(profile.role === 'super_admin' ? '/super/companies' : '/home');
 
@@ -20,7 +20,7 @@ export default async function UsersPage() {
       : supabase.from('departments').select('id, name, company_id').eq('company_id', companyId).order('name'),
     supabase.from('department_members').select('department_id, user_id, is_manager'),
     crossCompany
-      ? supabase.from('companies').select('id, name').eq('is_active', true).order('name')
+      ? supabase.from('companies').select('id, name, kind').eq('is_active', true).order('name')
       : Promise.resolve({ data: [] } as any)
   ]);
 
@@ -38,6 +38,8 @@ export default async function UsersPage() {
       role: u.role,
       is_active: u.is_active,
       leave_allowance: u.leave_allowance ?? 14,
+      is_customer: u.is_customer === true,
+      customer_name: u.customer_name ?? '',
       memberIds: mine.filter((m: any) => !m.is_manager).map((m: any) => m.department_id),
       managerIds: mine.filter((m: any) => m.is_manager).map((m: any) => m.department_id)
     };
@@ -45,9 +47,13 @@ export default async function UsersPage() {
 
   return (
     <main className="max-w-3xl mx-auto p-4 md:p-8">
-      <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-1">Kullanıcılar</h1>
+      <h1 className="text-[28px] leading-tight font-bold tracking-tight mb-1">
+        {isOrderLine ? 'Müşteriler & Sorumlular' : 'Kullanıcılar'}
+      </h1>
       <p className="text-[14px] text-[#8E8E93] mb-6">
-        Düzenlemek için bir kullanıcıya dokunun — ad, rol, departman ve parola tek panelden.
+        {isOrderLine
+          ? 'Bu bir Lole Sipariş Hattıdır. Önce en az bir Sipariş Sorumlusu açın, ardından müşteri hesaplarını "Müşteri hesabı" kutusunu işaretleyerek ekleyin.'
+          : 'Düzenlemek için bir kullanıcıya dokunun — ad, rol, departman ve parola tek panelden.'}
       </p>
 
       <NewUserForm
@@ -59,7 +65,8 @@ export default async function UsersPage() {
 
       <div className="card divide-y divide-white/[0.08] mt-6 overflow-hidden">
         {rows.map(u => (
-          <UserManage key={u.id} user={u} departments={companyDepts as any} meId={profile.id} meIsSuper={isSuper} />
+          <UserManage key={u.id} user={u} departments={companyDepts as any} meId={profile.id} meIsSuper={isSuper}
+            isOrderLine={isOrderLine} />
         ))}
       </div>
     </main>

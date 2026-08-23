@@ -34,7 +34,10 @@ export async function createUser(formData: FormData) {
     role: z.enum(['admin', 'manager', 'staff']),
     company_id: z.string().uuid().optional().nullable(),
     departments: z.array(z.string().uuid()).default([]),
-    manager_departments: z.array(z.string().uuid()).default([])
+    manager_departments: z.array(z.string().uuid()).default([]),
+    // Lole Sipariş Hattı: müşteri hesabı mı?
+    is_customer: z.boolean().default(false),
+    customer_name: z.string().max(150).optional().default('')
   });
   const parsed = schema.safeParse({
     full_name: String(formData.get('full_name') ?? '').trim(),
@@ -43,7 +46,9 @@ export async function createUser(formData: FormData) {
     role: String(formData.get('role') ?? 'staff'),
     company_id: String(formData.get('company_id') ?? '') || null,
     departments: formData.getAll('departments').map(String),
-    manager_departments: formData.getAll('manager_departments').map(String)
+    manager_departments: formData.getAll('manager_departments').map(String),
+    is_customer: formData.get('is_customer') === 'on',
+    customer_name: String(formData.get('customer_name') ?? '').trim()
   });
   if (!parsed.success) return { error: 'Ad, kullanıcı adı ve en az 8 karakterli parola gerekli.' };
   const input = parsed.data;
@@ -70,6 +75,34 @@ export async function createUser(formData: FormData) {
 
   const admin = supabaseAdmin();
 
+  // ---- MÜŞTERİ HESABI DOĞRULAMASI (Lole Sipariş Hattı) ----
+  const { data: targetCompany } = await admin
+    .from('companies').select('id, kind').eq('id', companyId).maybeSingle();
+  const isOrderLineCompany = (targetCompany as any)?.kind === 'order_line';
+  if (input.is_customer && !isOrderLineCompany) {
+    return { error: 'Müşteri hesabı yalnızca bir Sipariş Hattı şirketinde açılabilir.' };
+  }
+  // müşteri hesabı daima personel yetkisindedir (yönetim yetkisi alamaz)
+  const effectiveRole = input.is_customer ? 'staff' : input.role;
+
+  // Sipariş hattında siparişleri YALNIZCA yönetici ve müdürler görür.
+  // Yetkisiz "personel" hesabı açmak anlamsızdır — sipariş sorumlusu müdür rolündedir.
+  if (!input.is_customer && isOrderLineCompany && !['admin', 'manager'].includes(effectiveRole)) {
+    return { error: 'Sipariş hattında personel hesabı açılamaz. Sipariş Sorumlusu (Müdür) veya Admin seçin — siparişleri yalnızca bu hesaplar görebilir.' };
+  }
+
+  // sipariş hattında ilk hesap müşteri olamaz: siparişleri karşılayacak
+  // en az bir sorumlu (müdür ya da admin) bulunmalı, aksi halde bildirim kimseye gitmez
+  if (input.is_customer && isOrderLineCompany) {
+    const { count: staffCount } = await admin.from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId).eq('is_customer', false)
+      .in('role', ['admin', 'manager']);
+    if (!staffCount) {
+      return { error: 'Önce bu sipariş hattına en az bir Sipariş Sorumlusu (Müdür) hesabı açın. Aksi halde siparişleri kimse göremez.' };
+    }
+  }
+
   // guard: only departments of the target company are honored
   const { data: validDepts } = await admin
     .from('departments').select('id').eq('company_id', companyId);
@@ -79,7 +112,7 @@ export async function createUser(formData: FormData) {
     email,
     password: input.password,
     email_confirm: true,
-    user_metadata: { full_name: input.full_name, role: input.role, company_id: companyId }
+    user_metadata: { full_name: input.full_name, role: effectiveRole, company_id: companyId }
   });
   if (error) {
     const msg = String(error.message).includes('already been registered')
@@ -89,12 +122,17 @@ export async function createUser(formData: FormData) {
   }
 
   await admin.from('profiles').update({
-    full_name: input.full_name, role: input.role, company_id: companyId, email
+    full_name: input.full_name, role: effectiveRole, company_id: companyId, email,
+    is_customer: input.is_customer,
+    customer_name: input.is_customer ? (input.customer_name || input.full_name) : null
   }).eq('id', data.user.id);
 
   const memberships = new Map<string, boolean>();
-  for (const d of input.departments) if (valid.has(d)) memberships.set(d, false);
-  for (const d of input.manager_departments) if (valid.has(d)) memberships.set(d, true);
+  // müşteri hesabı hiçbir departmana eklenmez
+  if (!input.is_customer) {
+    for (const d of input.departments) if (valid.has(d)) memberships.set(d, false);
+    for (const d of input.manager_departments) if (valid.has(d)) memberships.set(d, true);
+  }
   if (memberships.size) {
     await admin.from('department_members').upsert(
       Array.from(memberships.entries()).map(([department_id, is_manager]) => ({
@@ -120,7 +158,9 @@ export async function updateUser(formData: FormData) {
     new_password: z.string().max(72).optional().default(''),
     leave_allowance: z.coerce.number().min(0).max(90).default(14),
     departments: z.array(z.string().uuid()).default([]),
-    manager_departments: z.array(z.string().uuid()).default([])
+    manager_departments: z.array(z.string().uuid()).default([]),
+    is_customer: z.boolean().default(false),
+    customer_name: z.string().max(150).optional().default('')
   });
   const parsed = schema.safeParse({
     user_id: String(formData.get('user_id') ?? ''),
@@ -129,7 +169,9 @@ export async function updateUser(formData: FormData) {
     new_password: String(formData.get('new_password') ?? '').trim(),
     leave_allowance: formData.get('leave_allowance') || 14,
     departments: formData.getAll('departments').map(String),
-    manager_departments: formData.getAll('manager_departments').map(String)
+    manager_departments: formData.getAll('manager_departments').map(String),
+    is_customer: formData.get('is_customer') === 'on',
+    customer_name: String(formData.get('customer_name') ?? '').trim()
   });
   if (!parsed.success) return { error: 'Ad en az 2 karakter olmalı.' };
   const input = parsed.data;
@@ -157,12 +199,25 @@ export async function updateUser(formData: FormData) {
       (input.role === 'admin' || target.role === 'admin')) {
     return { error: 'Admin yetkisini yalnızca Süper Admin verebilir veya alabilir.' };
   }
+  // ---- MÜŞTERİ HESABI (Lole Sipariş Hattı) ----
+  const { data: targetCompany } = await admin
+    .from('companies').select('kind').eq('id', target.company_id ?? '').maybeSingle();
+  const isOrderLineCompany = (targetCompany as any)?.kind === 'order_line';
+  if (input.is_customer && !isOrderLineCompany) {
+    return { error: 'Müşteri hesabı yalnızca bir Sipariş Hattı şirketinde olabilir.' };
+  }
+
   // kendi rolünü düşürmesin
-  const roleToSet = input.user_id === profile.id ? target.role : input.role;
+  let roleToSet = input.user_id === profile.id ? target.role : input.role;
+  // müşteri hesabına asla yönetim yetkisi verilemez
+  if (input.is_customer) roleToSet = 'staff';
 
   const ops: any[] = [
     admin.from('profiles').update({
-      full_name: input.full_name, role: roleToSet, leave_allowance: input.leave_allowance
+      full_name: input.full_name, role: roleToSet, leave_allowance: input.leave_allowance,
+      is_customer: input.is_customer,
+      customer_name: input.is_customer ? (input.customer_name || input.full_name) : null,
+      customer_account_id: input.is_customer ? undefined : null
     }).eq('id', input.user_id)
   ];
   if (input.new_password) {
@@ -182,8 +237,11 @@ export async function updateUser(formData: FormData) {
     .in('department_id', Array.from(valid));
 
   const memberships = new Map<string, boolean>();
-  for (const d of input.departments) if (valid.has(d)) memberships.set(d, false);
-  for (const d of input.manager_departments) if (valid.has(d)) memberships.set(d, true);
+  // müşteri hesabı hiçbir departmana üye olamaz
+  if (!input.is_customer) {
+    for (const d of input.departments) if (valid.has(d)) memberships.set(d, false);
+    for (const d of input.manager_departments) if (valid.has(d)) memberships.set(d, true);
+  }
   if (memberships.size) {
     await admin.from('department_members').insert(
       Array.from(memberships.entries()).map(([department_id, is_manager]) => ({
@@ -395,11 +453,14 @@ export async function restoreBackup(formData: FormData) {
 export async function createCompany(formData: FormData) {
   const schema = z.object({
     name: z.string().min(2).max(120),
-    accent_color: z.string().optional().default('#ff5a1f')
+    accent_color: z.string().optional().default('#ff5a1f'),
+    // 'order_line' = Lole Sipariş Hattı (müşteri paneli)
+    kind: z.enum(['internal', 'order_line']).default('internal')
   });
   const parsed = schema.safeParse({
     name: String(formData.get('name') ?? '').trim(),
-    accent_color: String(formData.get('accent_color') ?? '#ff5a1f')
+    accent_color: String(formData.get('accent_color') ?? '#ff5a1f'),
+    kind: String(formData.get('kind') ?? 'internal')
   });
   if (!parsed.success) return { error: 'Şirket adı gerekli.' };
 
@@ -411,9 +472,11 @@ export async function createCompany(formData: FormData) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
   const { error } = await supabase.from('companies').insert({
-    name: parsed.data.name, slug, accent_color: parsed.data.accent_color
+    name: parsed.data.name, slug, accent_color: parsed.data.accent_color,
+    kind: parsed.data.kind
   });
   if (error) return { error: error.message };
   revalidatePath('/super/companies');
-  return { ok: true };
+  revalidatePath('/', 'layout');
+  return { ok: true, kind: parsed.data.kind };
 }

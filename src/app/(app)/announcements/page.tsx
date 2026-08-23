@@ -10,7 +10,7 @@ import { Pin } from 'lucide-react';
 export const dynamic = 'force-dynamic';
 
 export default async function AnnouncementsPage() {
-  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
+  const { supabase, profile, companyId, managedDepartmentIds, isOrderLine, isCustomer } = await getCtx();
   if (!companyId) redirect(profile.role === 'super_admin' ? '/super/companies' : '/home');
 
   const canPost = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
@@ -58,6 +58,13 @@ export default async function AnnouncementsPage() {
 
       <MarkRead ids={unreadIds} />
 
+      {canPost && isOrderLine && (
+        <p className="text-[13px] text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2 mb-3">
+          ⚠️ Bu bir Sipariş Hattıdır: buraya yazdığınız duyuruyu <b>müşteriler de görür</b>.
+          İç yazışma için ilgili grup şirketini kullanın.
+        </p>
+      )}
+
       {canPost && (
         <AnnouncementComposer
           departments={postableDepts as any}
@@ -101,12 +108,15 @@ export default async function AnnouncementsPage() {
                 </>
               )}
             </div>
-            <AnnouncementComments
-              annId={a.id}
-              comments={commentsByAnn[a.id] ?? []}
-              meId={profile.id}
-              isAdmin={['super_admin', 'admin'].includes(profile.role)}
-            />
+            {/* müşteri hesapları duyurulara yorum yazamaz (diğer müşterileri görmemeleri için) */}
+            {!isCustomer && (
+              <AnnouncementComments
+                annId={a.id}
+                comments={commentsByAnn[a.id] ?? []}
+                meId={profile.id}
+                isAdmin={['super_admin', 'admin'].includes(profile.role)}
+              />
+            )}
           </article>
         ))}
       </div>

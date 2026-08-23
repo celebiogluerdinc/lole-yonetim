@@ -5,21 +5,49 @@ import NavLink, { type IconName } from '@/components/NavLink';
 import MobileMenu from '@/components/MobileMenu';
 import { ConfirmProvider } from '@/components/ConfirmProvider';
 import Link from 'next/link';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { LogOut } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
+/** SİPARİŞ HATTI'nda kimseye gösterilmeyen sekmeler (personel dâhil). */
+const HIDE_ORDER_LINE = [
+  '/manage/tasks', '/manage/templates', '/manage', '/tasks', '/shifts', '/clock', '/leave',
+  '/payments', '/admin/departments', '/admin/qr', '/performance', '/calendar'
+];
+
+/** MÜŞTERİ hesabına ek olarak kapalı sekmeler. */
+const HIDE_CUSTOMER = [
+  ...HIDE_ORDER_LINE,
+  '/home', '/search', '/assistant', '/incidents', '/meetings', '/files',
+  '/admin/users', '/admin/settings', '/super/companies'
+];
+
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
+  const { supabase, profile, companyId, managedDepartmentIds, isOrderLine, isCustomer } = await getCtx();
+
+  // ---- ROTA KAPISI ----
+  // Menüyü gizlemek güvenlik değildir: adres elle yazılsa bile engellenir.
+  // (Asıl savunma veritabanı kurallarıdır — bu yalnızca ilk katmandır.)
+  const blockedRoutes = isCustomer ? HIDE_CUSTOMER : (isOrderLine ? HIDE_ORDER_LINE : []);
+  const currentPath = headers().get('x-pathname') ?? '';
+  if (blockedRoutes.length && currentPath) {
+    const hit = blockedRoutes.some(r => currentPath === r || currentPath.startsWith(r + '/'));
+    if (hit) redirect(isCustomer ? '/purchasing' : '/home');
+  }
 
   // same rule the /manage pages enforce — "manager" role alone isn't enough,
   // the user must actually manage a department (or be an admin)
   const isManagerRole = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
   const isAdminRole = ['super_admin', 'admin'].includes(profile.role);
 
+  const nowIso = new Date().toISOString();
+
   const [
     companyRes, { count: unreadCount }, appNameRes,
-    { count: msgUnreadCount }, annRes, annReadRes, { count: reviewCount }, myAssignedRes
+    { count: msgUnreadCount }, annRes, annReadRes, { count: reviewCount }, myAssignedRes,
+    incidentRes, meetingRes, orderRes
   ] = await Promise.all([
     companyId
       ? supabase.from('companies').select('name').eq('id', companyId).maybeSingle()
@@ -38,14 +66,36 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       ? supabase.from('announcements').select('id').eq('company_id', companyId).limit(200)
       : Promise.resolve({ data: [] } as any),
     supabase.from('announcement_reads').select('announcement_id').eq('user_id', profile.id),
-    // yöneticiler: onay bekleyen görev sayısı
-    isManagerRole && companyId
+    // yöneticiler: onay bekleyen görev sayısı (sipariş hattında görev modülü yok)
+    isManagerRole && companyId && !isOrderLine
       ? supabase.from('tasks')
           .select('id', { count: 'exact', head: true })
           .eq('company_id', companyId).eq('status', 'pending_review')
       : Promise.resolve({ count: 0 } as any),
     // bana atanan açık görevler (bugün + geciken → Ana Sayfa rozeti)
-    supabase.from('task_assignees').select('tasks(status, due_at)').eq('user_id', profile.id)
+    isOrderLine
+      ? Promise.resolve({ data: [] } as any)
+      : supabase.from('task_assignees').select('tasks(status, due_at)').eq('user_id', profile.id),
+    // olay kaydı: onay bekleyenler (yalnızca yönetici + süper yönetici görür)
+    isAdminRole && companyId && !isCustomer
+      ? supabase.from('incidents')
+          .select('id', { count: 'exact', head: true })
+          .eq('company_id', companyId).eq('status', 'pending')
+      : Promise.resolve({ count: 0 } as any),
+    // toplantı: davetli olduğum, henüz yapılmamış toplantılar
+    supabase.from('meeting_participants')
+      .select('meetings!inner(status, meeting_at)')
+      .eq('user_id', profile.id)
+      .eq('meetings.status', 'scheduled')
+      .gte('meetings.meeting_at', nowIso)
+      .limit(200),
+    // sipariş hattı rozeti: bekleyen siparişler
+    // (müşteri yalnızca kendi bekleyen siparişlerini sayar — veritabanı kuralı gereği)
+    isOrderLine && companyId
+      ? supabase.from('purchase_requests')
+          .select('id', { count: 'exact', head: true })
+          .eq('company_id', companyId).eq('status', 'pending')
+      : Promise.resolve({ count: 0 } as any)
   ]);
   const appName = appNameRes?.data?.value ?? 'Lole Yönetim';
   let companyName = appName;
@@ -65,6 +115,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       (new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date(t.due_at)) === todayIst
         || new Date(t.due_at).getTime() < now)).length;
 
+  const incidentPending = (incidentRes as any)?.count ?? 0;
+  const upcomingMeetings = ((meetingRes as any)?.data ?? []).length;
+  const orderPending = (orderRes as any)?.count ?? 0;
+
   const nav = ([
     { href: '/home', label: 'Ana Sayfa', icon: 'home', show: true, badge: myToday },
     { href: '/search', label: 'Arama', icon: 'search', show: true, badge: 0 },
@@ -74,8 +128,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/calendar', label: 'Takvim', icon: 'calendar', show: true, badge: 0 },
     { href: '/announcements', label: 'Duyurular', icon: 'megaphone', show: true, badge: annUnread },
     { href: '/performance', label: 'Performans', icon: 'chart', show: true, badge: 0 },
-    { href: '/purchasing', label: 'Satın Alma', icon: 'cart', show: true, badge: 0 },
+    // sipariş hattında bu sekme "Sipariş Ver" adıyla görünür (aynı modül)
+    { href: '/purchasing', label: isOrderLine ? 'Sipariş Ver' : 'Satın Alma', icon: 'cart', show: true, badge: isOrderLine ? orderPending : 0 },
     { href: '/payments', label: 'Ödeme Talepleri', icon: 'wallet', show: true, badge: 0 },
+    { href: '/incidents', label: 'Olay Kaydı', icon: 'incident', show: true, badge: incidentPending },
+    { href: '/meetings', label: 'Toplantılar', icon: 'meeting', show: true, badge: upcomingMeetings },
     { href: '/shifts', label: 'Vardiyalar', icon: 'shift', show: true, badge: 0 },
     { href: '/leave', label: 'İzinler', icon: 'leave', show: true, badge: 0 },
     { href: '/clock', label: 'Mesai', icon: 'clock', show: true, badge: 0 },
@@ -87,7 +144,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/admin/settings', label: 'Yönetim Paneli', icon: 'settings', show: isAdminRole, badge: 0 },
     { href: '/super/companies', label: 'Şirketler', icon: 'landmark', show: true, badge: 0 },
     { href: '/profile', label: 'Profilim', icon: 'profile', show: true, badge: 0 }
-  ] as const).filter(n => n.show) as unknown as { href: string; label: string; icon: IconName; show: boolean; badge: number }[];
+  ] as const)
+    .filter(n => n.show)
+    // sipariş hattında / müşteri hesabında kapalı sekmeler menüden de kaldırılır
+    .filter(n => !blockedRoutes.includes(n.href))
+    // sipariş hattında "Sipariş Ver" en üstte (mobil alt bar için de ilk sırada)
+    .sort((a, b) => isOrderLine
+      ? (a.href === '/purchasing' ? -1 : 0) - (b.href === '/purchasing' ? -1 : 0)
+      : 0) as unknown as { href: string; label: string; icon: IconName; show: boolean; badge: number }[];
 
   return (
     <ConfirmProvider>
@@ -95,14 +159,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {/* Sidebar — desktop (macOS Reminders style) */}
       <aside className="hidden md:flex w-60 flex-col border-r border-white/[0.08] bg-[#141416] p-4 sticky top-0 h-dvh overflow-y-auto overscroll-contain
         [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.18)_transparent]">
-        <Link href="/super/companies" title="Şirketler sayfasını aç"
+        <Link href={isCustomer ? '/profile' : '/super/companies'}
+          title={isCustomer ? 'Hesabım' : 'Şirketler sayfasını aç'}
           className="flex items-center gap-2.5 px-2 mb-6 rounded-xl py-1 -mx-1 hover:bg-white/[0.05] transition-colors">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-white flex items-center justify-center font-bold shadow-sm">
             {appName[0]?.toUpperCase() ?? 'L'}
           </div>
           <div className="min-w-0">
             <p className="font-semibold text-sm leading-tight truncate">{companyName}</p>
-            <p className="text-xs text-[#8E8E93]">{appName}</p>
+            <p className="text-xs text-[#8E8E93]">{isOrderLine ? '📦 Sipariş Hattı' : appName}</p>
           </div>
         </Link>
         {/* menü uzunsa kenar çubuğunun tamamı kayar — fare tekerleği her yerde çalışır */}
@@ -138,7 +203,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#1C1C1E]/85 backdrop-blur-xl border-t border-white/[0.10] flex justify-around py-1.5 z-40 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {nav.slice(0, 4).map(n => (
           <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} mobile
-            short={({ 'Ana Sayfa': 'Anasayfa', 'Lole Asistan': 'Asistan', 'Bildirimler': 'Bildirim', 'Ödeme Talepleri': 'Ödeme', 'Satın Alma': 'Satın Al' } as Record<string, string>)[n.label] ?? n.label} />
+            short={({ 'Ana Sayfa': 'Anasayfa', 'Lole Asistan': 'Asistan', 'Bildirimler': 'Bildirim', 'Ödeme Talepleri': 'Ödeme', 'Satın Alma': 'Satın Al', 'Sipariş Ver': 'Sipariş', 'Olay Kaydı': 'Olay', 'Toplantılar': 'Toplantı' } as Record<string, string>)[n.label] ?? n.label} />
         ))}
         <MobileMenu
           items={nav.map(({ href, label, icon, badge }) => ({ href, label, icon, badge }))}
