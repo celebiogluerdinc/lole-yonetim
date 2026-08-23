@@ -4,11 +4,13 @@ import { useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Plus, X, Trash2, ShoppingCart, LayoutTemplate, ThumbsUp, ThumbsDown, Ban, ChevronDown
+  Plus, X, Trash2, ShoppingCart, LayoutTemplate, ThumbsUp, ThumbsDown, Ban, ChevronDown,
+  Package, RefreshCw, CalendarDays, MapPin, Lock
 } from 'lucide-react';
 import {
   createPurchaseRequest, decidePurchaseRequest, cancelPurchaseRequest,
-  completePurchaseRequest, savePurchaseRequestAsTemplate, deletePurchaseTemplate
+  completePurchaseRequest, savePurchaseRequestAsTemplate, deletePurchaseTemplate,
+  reorderPurchaseRequest
 } from '@/app/(app)/purchasing/actions';
 import PrintButton, { type PrintTable } from '@/components/PrintButton';
 import { useConfirm } from '@/components/ConfirmProvider';
@@ -18,6 +20,9 @@ interface Req {
   id: string; title: string; note: string | null; status: string; date: string; day: string;
   requester: string; requesterId: string; dept: string | null;
   decider: string | null; decisionNote: string | null; items: Item[];
+  /** sipariş hattı alanları (iç şirketlerde boş) */
+  orderCode?: string | null; neededAt?: string | null; neededDay?: string | null;
+  address?: string | null; decidedAt?: string | null;
 }
 interface Tpl {
   id: string; name: string; note: string | null; creator: string; creatorId: string;
@@ -33,9 +38,63 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: 'İptal', cls: 'bg-white/10 text-[#8E8E93]' }
 };
 
+/** SİPARİŞ HATTI: aynı durumlar, sipariş diliyle etiketlenir (renkler aynı kalır). */
+const ORDER_STATUS_LABEL: Record<string, string> = {
+  pending: 'Beklemede',
+  approved: '👨‍🍳 Hazırlanıyor',
+  completed: '🚚 Teslim Edildi',
+  rejected: 'Karşılanamadı',
+  cancelled: 'İptal'
+};
+
 const FILTERS = [
   ['pending', 'Bekleyen'], ['approved', 'Onaylanan'], ['completed', 'Bitirilen'], ['all', 'Tümü']
 ] as const;
+
+const ORDER_FILTER_LABEL: Record<string, string> = {
+  pending: 'Bekleyen', approved: 'Hazırlanan', completed: 'Teslim Edilen', all: 'Tümü'
+};
+
+/** Sipariş hattı ile satın alma arasındaki tüm metin farkları tek yerde. */
+function dict(order: boolean) {
+  return {
+    pageTitle: order ? '📦 Sipariş Ver' : '🛒 Satın Alma',
+    listTab: order ? 'Siparişler' : 'Talepler',
+    newBtn: order ? 'Yeni Sipariş' : 'Yeni Talep',
+    formTitle: order ? 'Yeni Sipariş' : 'Yeni Satın Alma Talebi',
+    titleLabel: order ? 'Sipariş başlığı *' : 'Talep başlığı *',
+    titlePlaceholder: order ? 'Örn. Haftalık ekmek siparişi' : 'Örn. Mutfak haftalık malzeme',
+    submit: order ? 'Siparişi Gönder' : 'Talebi Gönder',
+    submitting: order ? 'Gönderiliyor…' : 'Gönderiliyor…',
+    created: order
+      ? 'Siparişiniz alındı — sipariş sorumlularına bildirim gitti.'
+      : 'Satın alma talebi oluşturuldu — yöneticilere bildirim gitti.',
+    createdTpl: order
+      ? 'Sipariş alındı ve şablonlara kaydedildi.'
+      : 'Talep oluşturuldu ve şablonlara kaydedildi.',
+    emptyIcon: order ? '📦' : '🛒',
+    empty: order
+      ? 'Bu filtre ve tarih aralığında sipariş yok.'
+      : 'Bu filtre ve tarih aralığında talep yok.',
+    subPending: (n: number) => order
+      ? (n > 0 ? `${n} bekleyen sipariş` : 'Sipariş verin, sorumlular hazırlasın')
+      : (n > 0 ? `${n} bekleyen talep` : 'Talep oluşturun, yöneticiler onaylasın'),
+    printTitle: order ? 'Sipariş Formu' : 'Satın Alma Talepleri',
+    approve: order ? 'Onayla / Hazırla' : 'Onayla',
+    complete: order ? '🚚 Teslim Edildi' : '🏁 İşlem Bitirildi',
+    completed: order ? 'Sipariş teslim edildi olarak işaretlendi.' : 'İşlem bitirildi olarak işaretlendi.',
+    approved: order ? 'Sipariş onaylandı.' : 'Talep onaylandı.',
+    rejected: order ? 'Sipariş karşılanamadı olarak işaretlendi.' : 'Talep reddedildi.',
+    rejectPlaceholder: order ? 'Karşılanamama sebebi…' : 'Reddetme sebebi…',
+    cancel: order ? 'Siparişi İptal Et' : 'Talebi İptal Et',
+    cancelAsk: order ? 'Siparişiniz iptal edilsin mi?' : 'Talebiniz iptal edilsin mi?',
+    useTpl: order ? 'Sipariş Ver' : 'Talep Oluştur',
+    tplEmpty: order
+      ? 'Henüz sipariş şablonu yok. Sipariş verirken "şablon olarak kaydet" işaretleyin veya bir siparişin altındaki "Şablona Kaydet" düğmesini kullanın.'
+      : 'Henüz satın alma şablonu yok. Talep oluştururken "şablon olarak kaydet" işaretleyin veya bir talebin altındaki "Şablona Kaydet" düğmesini kullanın.',
+    requesterCol: order ? 'Müşteri' : 'Talep Eden'
+  };
+}
 
 const emptyRow = () => ({ product: '', quantity: '', unit: '', brand: '', spec: '' });
 
@@ -44,12 +103,22 @@ const itemLine = (it: Item) =>
     .filter(Boolean).join(' · ');
 
 export default function PurchasingClient({
-  tab, requests, templates, departments, meId, isAdmin, isDecider
+  tab, requests, templates, departments, meId, isAdmin, isDecider,
+  mode = 'purchase', isCustomer = false
 }: {
   tab: 'requests' | 'templates';
   requests: Req[]; templates: Tpl[]; departments: Dept[];
   meId: string; isAdmin: boolean; isDecider: boolean;
+  /** 'order' = Lole Sipariş Hattı görünümü (aynı modül, sipariş dili) */
+  mode?: 'purchase' | 'order';
+  isCustomer?: boolean;
 }) {
+  const isOrder = mode === 'order';
+  const T = dict(isOrder);
+  const statusOf = (s: string) => {
+    const base = STATUS[s] ?? STATUS.pending;
+    return isOrder ? { ...base, label: ORDER_STATUS_LABEL[s] ?? base.label } : base;
+  };
   const router = useRouter();
   const confirmS = useConfirm();
   const [pending, start] = useTransition();
@@ -63,6 +132,7 @@ export default function PurchasingClient({
   const [toDate, setToDate] = useState('');
   const [expandId, setExpandId] = useState<string | null>(null);
   const [rejectId, setRejectId] = useState<string | null>(null);
+  const [customerFilter, setCustomerFilter] = useState('');
   const formRef = useRef<HTMLFormElement>(null);
 
   const run = (fn: () => Promise<any>, okText?: string) => start(async () => {
@@ -97,40 +167,67 @@ export default function PurchasingClient({
     if (filter !== 'all' && r.status !== filter) return false;
     if (fromDate && r.day < fromDate) return false;
     if (toDate && r.day > toDate) return false;
+    if (customerFilter && r.requester !== customerFilter) return false;
     return true;
-  }), [requests, filter, fromDate, toDate]);
+  }), [requests, filter, fromDate, toDate, customerFilter]);
   const pendingCount = counts.pending ?? 0;
+
+  // sipariş hattı sorumlusu için günlük özet şeridi
+  const todayKey = useMemo(() => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date()), []);
+  const summary = useMemo(() => {
+    const openOrders = requests.filter(r => !['completed', 'cancelled', 'rejected'].includes(r.status));
+    return {
+      pending: requests.filter(r => r.status === 'pending').length,
+      preparing: requests.filter(r => r.status === 'approved').length,
+      today: openOrders.filter(r => r.neededDay === todayKey).length,
+      late: openOrders.filter(r => r.neededDay && r.neededDay < todayKey).length
+    };
+  }, [requests, todayKey]);
+  const customerNames = useMemo(
+    () => Array.from(new Set(requests.map(r => r.requester))).sort((a, b) => a.localeCompare(b, 'tr')),
+    [requests]
+  );
 
   const fmtTr = (d: string) => d ? new Date(d + 'T12:00:00').toLocaleDateString('tr-TR', {
     day: 'numeric', month: 'short', year: 'numeric' }) : '';
   const printTable: PrintTable = useMemo(() => ({
-    title: 'Satın Alma Talepleri',
+    title: T.printTitle,
     subtitle: [
-      FILTERS.find(f => f[0] === filter)?.[1] ?? 'Tümü',
+      (isOrder ? ORDER_FILTER_LABEL[filter] : FILTERS.find(f => f[0] === filter)?.[1]) ?? 'Tümü',
+      customerFilter || '',
       (fromDate || toDate) ? `${fmtTr(fromDate) || '…'} – ${fmtTr(toDate) || '…'}` : ''
     ].filter(Boolean).join(' · '),
     landscape: true,
-    headers: ['Tarih', 'Talep', 'Talep Eden', 'Departman', 'Ürünler', 'Durum', 'Karar'],
-    rows: filtered.map(r => [
-      r.date, r.title, r.requester, r.dept ?? '—',
-      r.items.map(itemLine).join('\n') || '—',
-      STATUS[r.status]?.label ?? r.status,
-      r.decider ? `${r.decider}${r.decisionNote ? ` — ${r.decisionNote}` : ''}` : '—'
-    ])
-  }), [filtered, filter, fromDate, toDate]);
+    headers: isOrder
+      ? ['Tarih', 'Sipariş No', 'Sipariş', 'Müşteri', 'Ürünler', 'İstenen Teslim', 'Durum']
+      : ['Tarih', 'Talep', 'Talep Eden', 'Departman', 'Ürünler', 'Durum', 'Karar'],
+    rows: filtered.map(r => isOrder
+      ? [
+          r.date, r.orderCode ?? '—', r.title, r.requester,
+          r.items.map(itemLine).join('\n') || '—',
+          r.neededAt ?? '—',
+          statusOf(r.status).label
+        ]
+      : [
+          r.date, r.title, r.requester, r.dept ?? '—',
+          r.items.map(itemLine).join('\n') || '—',
+          statusOf(r.status).label,
+          r.decider ? `${r.decider}${r.decisionNote ? ` — ${r.decisionNote}` : ''}` : '—'
+        ])
+  }), [filtered, filter, fromDate, toDate, customerFilter, isOrder]);
 
   return (
     <main className="max-w-4xl mx-auto p-4 md:p-8 space-y-5">
       <header className="px-1 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[28px] leading-tight font-bold tracking-tight">🛒 Satın Alma</h1>
-          <p className="text-[14px] text-[#8E8E93]">
-            {pendingCount > 0 ? `${pendingCount} bekleyen talep` : 'Talep oluşturun, yöneticiler onaylasın'}
-          </p>
+          <h1 className="text-[28px] leading-tight font-bold tracking-tight">{T.pageTitle}</h1>
+          <p className="text-[14px] text-[#8E8E93]">{T.subPending(pendingCount)}</p>
         </div>
         <div className="segment">
           <Link href="/purchasing" className={`segment-item ${tab === 'requests' ? 'segment-item-active' : ''}`}>
-            Talepler
+            {T.listTab}
           </Link>
           <Link href="/purchasing?tab=templates" className={`segment-item ${tab === 'templates' ? 'segment-item-active' : ''}`}>
             Şablonlar ({templates.length})
@@ -138,23 +235,53 @@ export default function PurchasingClient({
         </div>
       </header>
 
+      {isOrder && (
+        <div className="card p-3 flex items-start gap-2.5 border border-white/10">
+          <Lock size={15} className="text-[#8E8E93] mt-0.5 shrink-0" />
+          <p className="text-[13px] text-[#B0B0B5]">
+            {isCustomer
+              ? 'Burada yalnızca KENDİ siparişleriniz listelenir. Siparişlerinizi sizden başka yalnızca yönetici ve müdürler görebilir; diğer müşteriler göremez.'
+              : isDecider
+                ? 'Tüm müşterilerin siparişlerini görüyorsunuz. Müşteriler birbirlerinin siparişlerini göremez.'
+                : 'Siparişleri yalnızca yönetici ve müdürler görüntüleyebilir.'}
+          </p>
+        </div>
+      )}
+
       {error && <p className="text-[13px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2">{error}</p>}
       {ok && <p className="text-[13px] text-emerald-300 bg-emerald-500/10 rounded-xl px-3 py-2">✔ {ok}</p>}
 
-      {/* =============== TALEPLER =============== */}
+      {/* =============== TALEPLER / SİPARİŞLER =============== */}
       {tab === 'requests' && (
         <>
+          {/* sipariş sorumlusu için günlük özet şeridi */}
+          {isOrder && isDecider && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                ['Bekleyen', summary.pending, 'text-amber-300'],
+                ['Hazırlanan', summary.preparing, 'text-emerald-300'],
+                ['Bugün teslim', summary.today, 'text-sky-300'],
+                ['Gecikmiş', summary.late, 'text-rose-300']
+              ].map(([label, n, cls]) => (
+                <div key={label as string} className="card p-3 text-center">
+                  <p className={`text-[22px] font-bold leading-none ${cls}`}>{n as number}</p>
+                  <p className="text-[12px] text-[#8E8E93] mt-1">{label as string}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-2">
             {!formOpen && (
               <button onClick={() => openForm()} className="btn-primary">
-                <Plus size={16} /> Yeni Talep
+                <Plus size={16} /> {T.newBtn}
               </button>
             )}
             <div className="segment">
               {FILTERS.map(([k, l]) => (
                 <button key={k} onClick={() => setFilter(k)}
                   className={`segment-item ${filter === k ? 'segment-item-active' : ''}`}>
-                  {l} ({counts[k] ?? 0})
+                  {(isOrder ? ORDER_FILTER_LABEL[k] : l)} ({counts[k] ?? 0})
                 </button>
               ))}
             </div>
@@ -171,8 +298,17 @@ export default function PurchasingClient({
               <label className="label">Bitiş tarihi</label>
               <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="input !py-2" />
             </div>
-            {(fromDate || toDate) && (
-              <button onClick={() => { setFromDate(''); setToDate(''); }} className="btn-ghost text-sm">
+            {isOrder && isDecider && customerNames.length > 1 && (
+              <div>
+                <label className="label">Müşteri</label>
+                <select value={customerFilter} onChange={e => setCustomerFilter(e.target.value)} className="input !py-2">
+                  <option value="">— Tümü —</option>
+                  {customerNames.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+            )}
+            {(fromDate || toDate || customerFilter) && (
+              <button onClick={() => { setFromDate(''); setToDate(''); setCustomerFilter(''); }} className="btn-ghost text-sm">
                 <X size={14} /> Temizle
               </button>
             )}
@@ -195,9 +331,7 @@ export default function PurchasingClient({
                 const r = await createPurchaseRequest(fd);
                 if (r?.error) setError(r.error);
                 else {
-                  setOk(r.templateSaved
-                    ? 'Talep oluşturuldu ve şablonlara kaydedildi.'
-                    : 'Satın alma talebi oluşturuldu — yöneticilere bildirim gitti.');
+                  setOk(r.templateSaved ? T.createdTpl : T.created);
                   setFormOpen(false);
                   setRows([emptyRow()]);
                   router.refresh();
@@ -207,7 +341,7 @@ export default function PurchasingClient({
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-[15px] font-semibold flex items-center gap-2">
-                  <ShoppingCart size={15} /> Yeni Satın Alma Talebi
+                  {isOrder ? <Package size={15} /> : <ShoppingCart size={15} />} {T.formTitle}
                 </h3>
                 <button type="button" onClick={() => setFormOpen(false)}
                   className="w-7 h-7 rounded-full bg-white/10 text-[#8E8E93] flex items-center justify-center"><X size={14} /></button>
@@ -215,17 +349,31 @@ export default function PurchasingClient({
 
               <div className="grid sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Talep başlığı *</label>
+                  <label className="label">{T.titleLabel}</label>
                   <input name="title" required minLength={2} defaultValue={prefill.title ?? ''}
-                    className="input" placeholder="Örn. Mutfak haftalık malzeme" />
+                    className="input" placeholder={T.titlePlaceholder} />
                 </div>
-                <div>
-                  <label className="label">Departman</label>
-                  <select name="department_id" defaultValue={prefill.deptId ?? ''} className="input">
-                    <option value="">— Genel —</option>
-                    {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
-                </div>
+                {isOrder ? (
+                  <div>
+                    <label className="label">İstenen teslim tarihi</label>
+                    <input type="date" name="needed_at" min={todayKey} className="input" />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="label">Departman</label>
+                    <select name="department_id" defaultValue={prefill.deptId ?? ''} className="input">
+                      <option value="">— Genel —</option>
+                      {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {isOrder && (
+                  <div className="sm:col-span-2">
+                    <label className="label">Teslimat adresi</label>
+                    <input name="delivery_address" className="input"
+                      placeholder="Teslimatın yapılacağı adres / şube" />
+                  </div>
+                )}
               </div>
 
               {/* ürün satırları */}
@@ -264,11 +412,13 @@ export default function PurchasingClient({
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" name="save_template" className="rounded accent-[#0A84FF] w-4 h-4" />
                 <LayoutTemplate size={14} className="text-[#9F9CFF]" />
-                Bu talebi şablon olarak da kaydet (tekrar tekrar kullanmak için)
+                {isOrder
+                  ? 'Bu siparişi şablon olarak da kaydet (tek tuşla tekrar vermek için)'
+                  : 'Bu talebi şablon olarak da kaydet (tekrar tekrar kullanmak için)'}
               </label>
 
               <button className="btn-primary w-full" disabled={pending}>
-                {pending ? 'Gönderiliyor…' : 'Talebi Gönder'}
+                {pending ? T.submitting : T.submit}
               </button>
             </form>
           )}
@@ -276,24 +426,33 @@ export default function PurchasingClient({
           {/* ---- LİSTE ---- */}
           {filtered.length === 0 && (
             <div className="card p-10 text-center">
-              <p className="text-3xl mb-2">🛒</p>
-              <p className="text-[15px] text-[#8E8E93]">Bu filtre ve tarih aralığında talep yok.</p>
+              <p className="text-3xl mb-2">{T.emptyIcon}</p>
+              <p className="text-[15px] text-[#8E8E93]">{T.empty}</p>
             </div>
           )}
           <div className="space-y-3">
             {filtered.map(r => {
-              const st = STATUS[r.status] ?? STATUS.pending;
+              const st = statusOf(r.status);
               const open = expandId === r.id;
+              const late = isOrder && r.neededDay && r.neededDay < todayKey
+                && !['completed', 'cancelled', 'rejected'].includes(r.status);
               return (
                 <div key={r.id} className="card overflow-hidden">
                   <button onClick={() => setExpandId(open ? null : r.id)}
                     className="w-full flex items-center gap-3 p-4 text-left hover:bg-white/[0.03] transition-colors">
                     <div className="flex-1 min-w-0">
-                      <p className="text-[15px] font-semibold truncate">{r.title}</p>
+                      <p className="text-[15px] font-semibold truncate">
+                        {isOrder && r.orderCode && (
+                          <span className="text-[12px] font-mono text-[#8E8E93] mr-2">{r.orderCode}</span>
+                        )}
+                        {r.title}
+                      </p>
                       <p className="text-[12px] text-[#8E8E93] truncate">
                         {r.date} · {r.requester}{r.dept ? ` · ${r.dept}` : ''} · {r.items.length} kalem
+                        {isOrder && r.neededAt ? ` · teslim: ${r.neededAt}` : ''}
                       </p>
                     </div>
+                    {late && <span className="badge shrink-0 bg-rose-500/20 text-rose-300">gecikmiş</span>}
                     <span className={`badge shrink-0 ${st.cls}`}>{st.label}</span>
                     <ChevronDown size={15} className={`text-[#8E8E93] shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
                   </button>
@@ -313,41 +472,81 @@ export default function PurchasingClient({
                           </li>
                         ))}
                       </ul>
+                      {isOrder && (r.neededAt || r.address) && (
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-[#B0B0B5]">
+                          {r.neededAt && (
+                            <span className="flex items-center gap-1.5">
+                              <CalendarDays size={13} /> İstenen teslim: {r.neededAt}
+                            </span>
+                          )}
+                          {r.address && (
+                            <span className="flex items-center gap-1.5">
+                              <MapPin size={13} /> {r.address}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {r.note && <p className="text-[13px] text-[#8E8E93]">📝 {r.note}</p>}
                       {r.decider && (
                         <p className="text-[12px] text-[#8E8E93]">
                           Karar: {r.decider}{r.decisionNote ? ` — "${r.decisionNote}"` : ''}
                         </p>
                       )}
+                      {!r.decider && r.decisionNote && (
+                        <p className="text-[12px] text-[#8E8E93]">Not: &quot;{r.decisionNote}&quot;</p>
+                      )}
+                      {isOrder && r.decidedAt && (
+                        <p className="text-[12px] text-[#8E8E93]">
+                          {r.status === 'completed' ? '🚚 Teslim'
+                            : r.status === 'rejected' ? 'Yanıt'
+                            : r.status === 'approved' ? '👨‍🍳 Hazırlığa alındı'
+                            : 'Güncellendi'}: {r.decidedAt}
+                        </p>
+                      )}
 
                       <div className="flex flex-wrap gap-2">
                         {r.status === 'approved' && isDecider && (
                           <button disabled={pending}
-                            onClick={() => run(() => completePurchaseRequest(r.id), 'İşlem bitirildi olarak işaretlendi.')}
+                            onClick={() => run(() => completePurchaseRequest(r.id), T.completed)}
                             className="btn-primary text-sm">
-                            🏁 İşlem Bitirildi
+                            {T.complete}
                           </button>
                         )}
                         {r.status === 'pending' && isDecider && r.requesterId !== meId && (
                           <>
                             <button disabled={pending}
-                              onClick={() => run(() => decidePurchaseRequest(r.id, true), 'Talep onaylandı.')}
+                              onClick={() => run(() => decidePurchaseRequest(r.id, true), T.approved)}
                               className="btn-success text-sm">
-                              <ThumbsUp size={14} /> Onayla
+                              <ThumbsUp size={14} /> {T.approve}
                             </button>
                             <button disabled={pending} onClick={() => setRejectId(rejectId === r.id ? null : r.id)}
                               className="btn-outline text-sm !text-rose-300 !border-rose-500/30">
-                              <ThumbsDown size={14} /> Reddet
+                              <ThumbsDown size={14} /> {isOrder ? 'Karşılanamadı' : 'Reddet'}
                             </button>
                           </>
                         )}
                         {r.status === 'pending' && r.requesterId === meId && (
                           <button disabled={pending}
-                            onClick={async () => { if (await confirmS({ message: 'Talebiniz iptal edilsin mi?', danger: true })) run(() => cancelPurchaseRequest(r.id)); }}
+                            onClick={async () => { if (await confirmS({ message: T.cancelAsk, danger: true })) run(() => cancelPurchaseRequest(r.id)); }}
                             className="btn-outline text-sm !text-rose-300">
-                            <Ban size={14} /> Talebi İptal Et
+                            <Ban size={14} /> {T.cancel}
                           </button>
                         )}
+                        {/* tek tuşla aynı siparişi tekrar ver */}
+                        <button disabled={pending}
+                          onClick={async () => {
+                            const yes = await confirmS({
+                              title: isOrder ? 'Aynı sipariş tekrar verilsin mi?' : 'Aynı talep tekrar oluşturulsun mu?',
+                              message: `"${r.title}" içeriğiyle yeni bir kayıt açılacak.${
+                                isOrder ? ' Teslim tarihi boş kalır — tarih gerekiyorsa yeni sipariş formunu kullanın.' : ''}`,
+                              okText: isOrder ? 'Sipariş Ver' : 'Oluştur'
+                            });
+                            if (yes) run(() => reorderPurchaseRequest(r.id),
+                              isOrder ? 'Sipariş tekrar verildi.' : 'Talep tekrar oluşturuldu.');
+                          }}
+                          className="btn-outline text-sm">
+                          <RefreshCw size={14} /> {isOrder ? 'Aynısını Tekrar Sipariş Ver' : 'Aynısını Tekrar Talep Et'}
+                        </button>
                         <button disabled={pending}
                           onClick={() => run(() => savePurchaseRequestAsTemplate(r.id), 'Şablonlara eklendi.')}
                           className="btn-outline text-sm !text-[#9F9CFF]">
@@ -359,10 +558,12 @@ export default function PurchasingClient({
                         <form action={(fd) => {
                           const note = String(fd.get('note') ?? '');
                           setRejectId(null);
-                          run(() => decidePurchaseRequest(r.id, false, note), 'Talep reddedildi.');
+                          run(() => decidePurchaseRequest(r.id, false, note), T.rejected);
                         }} className="flex gap-2">
-                          <input name="note" required placeholder="Reddetme sebebi…" className="input" />
-                          <button className="btn-danger shrink-0" disabled={pending}>Reddet</button>
+                          <input name="note" required placeholder={T.rejectPlaceholder} className="input" />
+                          <button className="btn-danger shrink-0" disabled={pending}>
+                            {isOrder ? 'Karşılanamadı' : 'Reddet'}
+                          </button>
                         </form>
                       )}
                     </div>
@@ -380,10 +581,7 @@ export default function PurchasingClient({
           {templates.length === 0 && (
             <div className="card p-10 text-center">
               <p className="text-3xl mb-2">📋</p>
-              <p className="text-[15px] text-[#8E8E93]">
-                Henüz satın alma şablonu yok. Talep oluştururken &quot;şablon olarak kaydet&quot; işaretleyin
-                veya bir talebin altındaki &quot;Şablona Kaydet&quot; düğmesini kullanın.
-              </p>
+              <p className="text-[15px] text-[#8E8E93]">{T.tplEmpty}</p>
             </div>
           )}
           <div className="space-y-3">
@@ -402,7 +600,7 @@ export default function PurchasingClient({
                       onClick={() => openForm({ title: t.name, note: t.note ?? '', deptId: t.deptId ?? '', items: t.items })}
                       className="btn-outline text-sm"
                     >
-                      <ShoppingCart size={14} /> Talep Oluştur
+                      {isOrder ? <Package size={14} /> : <ShoppingCart size={14} />} {T.useTpl}
                     </Link>
                     {(isAdmin || t.creatorId === meId) && (
                       <button

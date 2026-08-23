@@ -9,7 +9,15 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  let response = NextResponse.next({ request });
+  // Aktif rota bilgisini sunucu bileşenlerine taşı: (app)/layout.tsx bunu okuyup
+  // sipariş hattı / müşteri hesapları için kapalı rotaları engeller.
+  const withPath = () => {
+    const h = new Headers(request.headers);
+    h.set('x-pathname', pathname);
+    return h;
+  };
+
+  let response = NextResponse.next({ request: { headers: withPath() } });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,7 +29,9 @@ export async function middleware(request: NextRequest) {
         },
         setAll(cookiesToSet: { name: string; value: string; options?: any }[]) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({ request });
+          // başlık kopyası çerezler yazıldıktan SONRA üretilir ki
+          // yenilenen oturum çerezleri kaybolmasın
+          response = NextResponse.next({ request: { headers: withPath() } });
           cookiesToSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options)
           );

@@ -6,7 +6,7 @@ import { UserPlus } from 'lucide-react';
 import { createUser } from '@/app/(app)/admin/actions';
 
 interface Dept { id: string; name: string; company_id: string; }
-interface Comp { id: string; name: string; }
+interface Comp { id: string; name: string; kind?: string; }
 
 export default function NewUserForm({
   departments, companies = [], defaultCompanyId, isSuper = false
@@ -20,6 +20,7 @@ export default function NewUserForm({
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [companyId, setCompanyId] = useState(defaultCompanyId);
+  const [isCustomer, setIsCustomer] = useState(false);
   const [pending, start] = useTransition();
   const router = useRouter();
   const ref = useRef<HTMLFormElement>(null);
@@ -28,6 +29,13 @@ export default function NewUserForm({
     () => departments.filter(d => d.company_id === companyId),
     [departments, companyId]
   );
+
+  // seçilen şirket bir Lole Sipariş Hattı mı?
+  const isOrderLine = useMemo(
+    () => companies.find(c => c.id === companyId)?.kind === 'order_line',
+    [companies, companyId]
+  );
+  const customerMode = isOrderLine && isCustomer;
 
   if (!open) {
     return (
@@ -79,11 +87,28 @@ export default function NewUserForm({
         </div>
         <div>
           <label className="label">Yetki (rol)</label>
-          <select name="role" defaultValue="staff" className="input">
-            <option value="staff">Personel — sadece kendi görevlerini yapar</option>
-            <option value="manager">Müdür — departmanını yönetir</option>
-            <option value="admin">Admin — tüm şirketi yönetir</option>
+          <select key={isOrderLine ? 'order' : 'internal'} name="role"
+            defaultValue={isOrderLine ? 'manager' : 'staff'} className="input" disabled={customerMode}>
+            {isOrderLine ? (
+              <>
+                <option value="manager">Sipariş Sorumlusu (Müdür) — siparişleri görür ve karşılar</option>
+                <option value="admin">Admin — tüm şirketi yönetir</option>
+              </>
+            ) : (
+              <>
+                <option value="staff">Personel — sadece kendi görevlerini yapar</option>
+                <option value="manager">Müdür — departmanını yönetir</option>
+                <option value="admin">Admin — tüm şirketi yönetir</option>
+              </>
+            )}
           </select>
+          {/* disabled select FormData'ya gitmez — değeri açıkça gönderiyoruz */}
+          {customerMode && <input type="hidden" name="role" value="staff" />}
+          {customerMode && (
+            <p className="text-[11px] text-[#8E8E93] mt-1">
+              Müşteri hesapları daima yetkisizdir; yalnızca kendi siparişlerini görür.
+            </p>
+          )}
         </div>
         {isSuper && (
           <div className="sm:col-span-2">
@@ -96,6 +121,34 @@ export default function NewUserForm({
         )}
       </div>
 
+      {/* ---- LOLE SİPARİŞ HATTI: müşteri hesabı ---- */}
+      {isOrderLine && (
+        <div className="rounded-xl border border-white/[0.10] p-3 space-y-3 bg-white/[0.03]">
+          <label className="flex items-start gap-2.5 text-sm cursor-pointer">
+            <input type="checkbox" name="is_customer" className="rounded accent-[#0A84FF] w-4 h-4 mt-0.5"
+              checked={isCustomer} onChange={e => setIsCustomer(e.target.checked)} />
+            <span>
+              <b>📦 Müşteri hesabı</b>
+              <span className="block text-[12px] text-[#8E8E93]">
+                Yalnızca sipariş verir ve KENDİ siparişlerini görür. Başka müşterinin
+                siparişini, adını veya firmasını göremez; görev, vardiya, mesai, ödeme ve
+                diğer şirket verilerine erişemez. Siparişleri yalnızca yönetici ve müdürler görür.
+              </span>
+            </span>
+          </label>
+          {isCustomer && (
+            <div>
+              <label className="label">Müşteri firma adı</label>
+              <input name="customer_name" className="input" placeholder="Örn: Yılmaz Market" />
+              <p className="text-[11px] text-[#8E8E93] mt-1">
+                Siparişlerde ve raporlarda bu ad görünür (boş bırakılırsa ad soyad kullanılır).
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!isOrderLine && (
       <div className="grid sm:grid-cols-2 gap-4">
         <div>
           <label className="label">Üye olduğu departmanlar</label>
@@ -120,6 +173,7 @@ export default function NewUserForm({
           </div>
         </div>
       </div>
+      )}
 
       <div className="flex gap-2">
         <button type="button" onClick={() => setOpen(false)} className="btn-outline flex-1">Kapat</button>

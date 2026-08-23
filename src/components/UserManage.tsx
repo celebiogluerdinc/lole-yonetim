@@ -10,16 +10,19 @@ interface Dept { id: string; name: string; }
 export interface ManagedUser {
   id: string; full_name: string; email: string; role: string; is_active: boolean;
   leave_allowance?: number;
+  is_customer?: boolean;
+  customer_name?: string;
   memberIds: string[];    // departments the user belongs to
   managerIds: string[];   // departments the user manages
 }
 
 export default function UserManage({
-  user, departments, meId, meIsSuper = false
-}: { user: ManagedUser; departments: Dept[]; meId: string; meIsSuper?: boolean }) {
+  user, departments, meId, meIsSuper = false, isOrderLine = false
+}: { user: ManagedUser; departments: Dept[]; meId: string; meIsSuper?: boolean; isOrderLine?: boolean }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const [isCustomer, setIsCustomer] = useState(user.is_customer === true);
   const [pending, start] = useTransition();
   const router = useRouter();
   const isSelf = user.id === meId;
@@ -44,7 +47,8 @@ export default function UserManage({
             {user.full_name || user.email}{isSelf ? ' (siz)' : ''}
           </p>
           <p className="text-xs text-[#8E8E93] truncate">
-            {ROLE_LABEL[user.role]} · {user.email}{deptNames ? ` · ${deptNames}` : ''}
+            {user.is_customer ? `📦 Müşteri${user.customer_name ? ` · ${user.customer_name}` : ''}` : ROLE_LABEL[user.role]}
+            {' · '}{user.email}{deptNames ? ` · ${deptNames}` : ''}
           </p>
         </div>
         <ChevronDown size={16} className={`text-[#8E8E93] shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -77,14 +81,26 @@ export default function UserManage({
             </div>
             <div>
               <label className="label">Yetki (rol)</label>
-              <select name="role" defaultValue={user.role} disabled={isSelf} className="input disabled:opacity-50">
-                <option value="staff">Personel</option>
-                <option value="manager">Müdür</option>
+              <select name="role" defaultValue={user.role} disabled={isSelf || isCustomer}
+                className="input disabled:opacity-50">
+                {isOrderLine
+                  ? <option value="manager">Sipariş Sorumlusu (Müdür)</option>
+                  : <>
+                      <option value="staff">Personel</option>
+                      <option value="manager">Müdür</option>
+                    </>}
                 <option value="admin">Admin</option>
                 {(meIsSuper || user.role === 'super_admin') && (
                   <option value="super_admin">Süper Admin (tüm şirketler)</option>
                 )}
               </select>
+              {/* disabled select FormData'ya gitmez — değeri açıkça gönderiyoruz */}
+              {(isSelf || isCustomer) && (
+                <input type="hidden" name="role" value={isCustomer ? 'staff' : user.role} />
+              )}
+              {isCustomer && (
+                <p className="text-[11px] text-[#8E8E93] mt-1">Müşteri hesapları daima yetkisizdir.</p>
+              )}
               {isSelf && <p className="text-[11px] text-[#8E8E93] mt-1">Kendi rolünüzü değiştiremezsiniz.</p>}
               {meIsSuper && !isSelf && (
                 <p className="text-[11px] text-[#8E8E93] mt-1">
@@ -94,11 +110,36 @@ export default function UserManage({
             </div>
           </div>
 
-          <div>
-            <label className="label">🏖 Yıllık izin hakkı (gün/yıl)</label>
-            <input name="leave_allowance" type="number" min={0} max={90}
-              defaultValue={user.leave_allowance ?? 14} className="input sm:max-w-[160px]" />
-          </div>
+          {/* ---- LOLE SİPARİŞ HATTI: müşteri hesabı ---- */}
+          {isOrderLine && (
+            <div className="rounded-xl border border-white/[0.10] p-3 space-y-3 bg-white/[0.03]">
+              <label className="flex items-start gap-2.5 text-sm cursor-pointer">
+                <input type="checkbox" name="is_customer" className="rounded accent-[#0A84FF] w-4 h-4 mt-0.5"
+                  checked={isCustomer} onChange={e => setIsCustomer(e.target.checked)} disabled={isSelf} />
+                <span>
+                  <b>📦 Müşteri hesabı</b>
+                  <span className="block text-[12px] text-[#8E8E93]">
+                    Yalnızca kendi siparişlerini görür; şirket verilerine ve diğer müşterilere erişemez.
+                  </span>
+                </span>
+              </label>
+              {isCustomer && (
+                <div>
+                  <label className="label">Müşteri firma adı</label>
+                  <input name="customer_name" defaultValue={user.customer_name ?? ''} className="input"
+                    placeholder="Örn: Yılmaz Market" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isOrderLine && (
+            <div>
+              <label className="label">🏖 Yıllık izin hakkı (gün/yıl)</label>
+              <input name="leave_allowance" type="number" min={0} max={90}
+                defaultValue={user.leave_allowance ?? 14} className="input sm:max-w-[160px]" />
+            </div>
+          )}
 
           <div>
             <label className="label flex items-center gap-1.5"><KeyRound size={12} /> Yeni parola belirle</label>
@@ -109,6 +150,7 @@ export default function UserManage({
             </p>
           </div>
 
+          {!isOrderLine && (
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <label className="label">Üye olduğu departmanlar</label>
@@ -135,6 +177,7 @@ export default function UserManage({
               </div>
             </div>
           </div>
+          )}
 
           <div className="flex items-center gap-2">
             {!isSelf && (

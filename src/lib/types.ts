@@ -5,6 +5,9 @@ export type TaskStatus =
   | 'open' | 'in_progress' | 'pending_review' | 'completed'
   | 'blocked' | 'overdue' | 'cancelled';
 
+/** 'internal' = grup şirketi · 'order_line' = Lole Sipariş Hattı (müşteri paneli) */
+export type CompanyKind = 'internal' | 'order_line';
+
 export interface Profile {
   id: string;
   company_id: string | null;
@@ -13,6 +16,12 @@ export interface Profile {
   role: UserRole;
   avatar_url: string | null;
   is_active: boolean;
+  /** müşteri hesabı mı? (yalnızca sipariş hattı şirketlerinde true olabilir) */
+  is_customer?: boolean;
+  /** müşteri firma adı */
+  customer_name?: string | null;
+  /** aynı müşteri firmasından 2. kullanıcı → ana hesap kimliği */
+  customer_account_id?: string | null;
 }
 
 export interface Company {
@@ -22,6 +31,7 @@ export interface Company {
   accent_color: string | null;
   timezone: string;
   is_active: boolean;
+  kind?: CompanyKind;
 }
 
 export interface Department {

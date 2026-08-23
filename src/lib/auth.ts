@@ -11,6 +11,12 @@ export interface Ctx {
   companyId: string | null;
   isManagerAnywhere: boolean;
   managedDepartmentIds: string[];
+  /** aktif şirketin türü: normal grup şirketi mi, sipariş hattı mı */
+  companyKind: 'internal' | 'order_line';
+  /** aktif şirket bir Lole Sipariş Hattı mı? */
+  isOrderLine: boolean;
+  /** oturumdaki kişi bir MÜŞTERİ hesabı mı? */
+  isCustomer: boolean;
 }
 
 /**
@@ -55,12 +61,25 @@ export const getCtx = cache(async (): Promise<Ctx> => {
 
   const managedDepartmentIds = (managed ?? []).map((m: any) => m.department_id);
 
+  // aktif şirketin türü (sipariş hattı mı?) — tek satırlık, birincil anahtar sorgusu.
+  // getCtx React cache() içinde olduğu için istek başına yalnızca bir kez çalışır.
+  let companyKind: 'internal' | 'order_line' = 'internal';
+  if (companyId) {
+    const { data: c } = await supabase
+      .from('companies').select('kind').eq('id', companyId).maybeSingle();
+    if ((c as any)?.kind === 'order_line') companyKind = 'order_line';
+  }
+  const isCustomer = (profile as any).is_customer === true;
+
   return {
     supabase,
     profile: profile as Profile,
     companyId,
     isManagerAnywhere: managedDepartmentIds.length > 0,
-    managedDepartmentIds
+    managedDepartmentIds,
+    companyKind,
+    isOrderLine: companyKind === 'order_line',
+    isCustomer
   };
 });
 
