@@ -65,6 +65,12 @@ export async function addShift(formData: FormData) {
   const allowed = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.includes(i.department_id);
   if (!allowed) return { error: 'Bu departmanda vardiya planlamaya yetkiniz yok.' };
 
+  // güvenlik: departman AKTİF şirkete ait olmalı (adminler tüm şirketlerde
+  // yetkili olduğu için yanlışlıkla başka şirketin departmanı seçilemesin)
+  const { data: deptOk } = await supabase.from('departments')
+    .select('id').eq('id', i.department_id).eq('company_id', companyId).maybeSingle();
+  if (!deptOk) return { error: 'Geçersiz departman seçimi.' };
+
   // güvenlik: hedef kişiler bu şirketin aktif çalışanları olmalı
   const { data: validUsers } = await supabase
     .from('profiles').select('id').eq('company_id', companyId).in('id', i.user_ids);

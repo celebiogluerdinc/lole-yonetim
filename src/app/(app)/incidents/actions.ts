@@ -3,31 +3,9 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
-import { pushToUsers } from '@/lib/push';
+import { notifyDeciders, notifyUser } from '@/lib/notify';
 
 const isAdmin = (role: string) => ['super_admin', 'admin'].includes(role);
-
-/** Olay kayıtlarını yalnızca admin + süper yönetici görür → bildirim de onlara gider. */
-async function notifyAdmins(
-  supabase: any, companyId: string, exceptId: string,
-  title: string, body: string, url: string
-) {
-  const [companyAdmins, supers] = await Promise.all([
-    supabase.from('profiles').select('id').eq('company_id', companyId).eq('role', 'admin'),
-    supabase.from('profiles').select('id').eq('role', 'super_admin')
-  ]);
-  const targets = new Set<string>([
-    ...((companyAdmins.data ?? []) as any[]).map(a => a.id),
-    ...((supers.data ?? []) as any[]).map(a => a.id)
-  ]);
-  targets.delete(exceptId);
-  if (!targets.size) return;
-  const ids = Array.from(targets);
-  await supabase.from('notifications').insert(ids.map(user_id => ({
-    company_id: companyId, user_id, type: 'custom', payload: { title, body, url }
-  })));
-  pushToUsers(ids, { title, body, url }).catch(() => {});
-}
 
 const IncidentSchema = z.object({
   title: z.string().min(3).max(200),
@@ -86,13 +64,19 @@ export async function createIncident(formData: FormData) {
   const sevTxt: Record<string, string> = {
     low: 'Düşük', medium: 'Orta', high: 'Yüksek', critical: 'Kritik'
   };
-  await notifyAdmins(supabase, companyId, profile.id,
-    '🚨 Yeni olay kaydı',
-    `${profile.full_name}: ${i.title} · ${sevTxt[i.severity]} önem`,
-    '/incidents');
+  // NOT: decider_ids() adminleri ve süper yöneticileri şirketten bağımsız bulur;
+  // olay kayıtlarını yalnızca onlar görebildiği için bildirim de onlara gider.
+  const notified = await notifyDeciders(supabase, {
+    companyId, exceptId: profile.id,
+    title: '🚨 Yeni olay kaydı',
+    body: `${profile.full_name}: ${i.title} · ${sevTxt[i.severity]} önem`,
+    url: '/incidents'
+  });
 
   revalidatePath('/incidents');
-  return { ok: true, id: row?.id };
+  revalidatePath('/notifications');
+  revalidatePath('/', 'layout');
+  return { ok: true, id: row?.id, notified };
 }
 
 /** Onayla / reddet — yalnızca admin + süper yönetici. */
@@ -117,19 +101,15 @@ export async function decideIncident(id: string, approve: boolean, note?: string
   if (error) return { error: error.message };
   if (!updated?.length) return { error: 'Bu kayıt az önce başka biri tarafından sonuçlandırıldı.' };
 
-  await supabase.from('notifications').insert({
-    company_id: inc.company_id, user_id: inc.reporter_id, type: 'custom',
-    payload: {
-      title: approve ? '✅ Olay kaydınız onaylandı' : '❌ Olay kaydınız reddedildi',
-      body: inc.title, url: '/incidents'
-    }
-  });
-  pushToUsers([inc.reporter_id], {
+  await notifyUser(supabase, {
+    companyId: inc.company_id, userId: inc.reporter_id,
     title: approve ? '✅ Olay kaydınız onaylandı' : '❌ Olay kaydınız reddedildi',
     body: inc.title, url: '/incidents'
-  }).catch(() => {});
+  });
 
   revalidatePath('/incidents');
+  revalidatePath('/notifications');
+  revalidatePath('/', 'layout');
   return { ok: true };
 }
 

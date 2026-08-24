@@ -30,7 +30,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // ---- ROTA KAPISI ----
   // Menüyü gizlemek güvenlik değildir: adres elle yazılsa bile engellenir.
   // (Asıl savunma veritabanı kurallarıdır — bu yalnızca ilk katmandır.)
-  const blockedRoutes = isCustomer ? HIDE_CUSTOMER : (isOrderLine ? HIDE_ORDER_LINE : []);
+  // ADMİN VE SÜPER YÖNETİCİ TÜM ŞİRKETLERDE VE SİPARİŞ HATTINDA TAM YETKİLİDİR:
+  // rota kapısı onlara UYGULANMAZ — sipariş hattında da görev, vardiya, mesai,
+  // ödeme ve departman ekranlarına girebilirler. Kapı yalnızca müşterileri ve
+  // sipariş hattındaki normal personeli sınırlar.
+  const isFullAccess = ['super_admin', 'admin'].includes(profile.role);
+  const blockedRoutes = isCustomer
+    ? HIDE_CUSTOMER
+    : (isOrderLine && !isFullAccess ? HIDE_ORDER_LINE : []);
   const currentPath = headers().get('x-pathname') ?? '';
   if (blockedRoutes.length && currentPath) {
     const hit = blockedRoutes.some(r => currentPath === r || currentPath.startsWith(r + '/'));

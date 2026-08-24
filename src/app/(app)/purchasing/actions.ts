@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
-import { pushToUsers } from '@/lib/push';
+import { notifyDeciders, notifyUser } from '@/lib/notify';
 
 const ItemSchema = z.object({
   product: z.string().min(1).max(200),
@@ -12,45 +12,6 @@ const ItemSchema = z.object({
   brand: z.string().max(100).optional().default(''),
   spec: z.string().max(300).optional().default('')
 });
-
-/**
- * company admins + all department managers → notification + push
- * SİPARİŞ HATTI: departman/müdür kavramı yoktur — bildirim, o hattaki
- * MÜŞTERİ OLMAYAN (sipariş sorumlusu) tüm aktif hesaplara gider.
- */
-async function notifyDeciders(
-  supabase: any, companyId: string, exceptId: string,
-  title: string, body: string, url: string, isOrderLine = false
-) {
-  const targets = new Set<string>();
-
-  if (isOrderLine) {
-    // sipariş hattında siparişleri YALNIZCA yönetici ve müdürler görür → bildirim de onlara
-    const { data: staff } = await supabase.from('profiles')
-      .select('id').eq('company_id', companyId)
-      .eq('is_customer', false).eq('is_active', true)
-      .in('role', ['admin', 'manager', 'super_admin']);
-    for (const s of (staff ?? []) as any[]) targets.add(s.id);
-  } else {
-    const [adminsRes, mgrsRes] = await Promise.all([
-      supabase.from('profiles').select('id').eq('company_id', companyId).eq('role', 'admin'),
-      supabase.from('department_members')
-        .select('user_id, departments!inner(company_id)')
-        .eq('is_manager', true)
-        .eq('departments.company_id', companyId)
-    ]);
-    for (const a of (adminsRes.data ?? []) as any[]) targets.add(a.id);
-    for (const m of (mgrsRes.data ?? []) as any[]) targets.add(m.user_id);
-  }
-
-  targets.delete(exceptId);
-  if (!targets.size) return;
-  const ids = Array.from(targets);
-  await supabase.from('notifications').insert(ids.map(user_id => ({
-    company_id: companyId, user_id, type: 'custom', payload: { title, body, url }
-  })));
-  pushToUsers(ids, { title, body, url }).catch(() => {});
-}
 
 /**
  * Karar verme yetkisi. Müşteri hesabı ASLA karar veremez.
@@ -193,13 +154,17 @@ export async function createPurchaseRequest(formData: FormData) {
   const who = isOrderLine
     ? ((profile as any).customer_name || profile.full_name)
     : profile.full_name;
-  await notifyDeciders(supabase, companyId, profile.id,
-    t.newTitle,
-    `${who}: ${i.title} (${i.items.length} kalem)`,
-    '/purchasing', isOrderLine);
+  const notified = await notifyDeciders(supabase, {
+    companyId, exceptId: profile.id,
+    title: t.newTitle,
+    body: `${who}: ${i.title} (${i.items.length} kalem)`,
+    url: '/purchasing'
+  });
 
   revalidatePath('/purchasing');
-  return { ok: true, templateSaved };
+  revalidatePath('/notifications');
+  revalidatePath('/', 'layout');
+  return { ok: true, templateSaved, notified };
 }
 
 /** Aynı siparişi tek tuşla yeniden ver (kalemler birebir kopyalanır). */
@@ -241,11 +206,15 @@ export async function reorderPurchaseRequest(requestId: string) {
   const who = isOrderLine
     ? ((profile as any).customer_name || profile.full_name)
     : profile.full_name;
-  await notifyDeciders(supabase, companyId, profile.id,
-    t.newTitle, `${who}: ${src.title} (tekrar sipariş)`, '/purchasing', isOrderLine);
+  const notified = await notifyDeciders(supabase, {
+    companyId, exceptId: profile.id,
+    title: t.newTitle, body: `${who}: ${src.title} (tekrar sipariş)`, url: '/purchasing'
+  });
 
   revalidatePath('/purchasing');
-  return { ok: true };
+  revalidatePath('/notifications');
+  revalidatePath('/', 'layout');
+  return { ok: true, notified };
 }
 
 /** Approve / reject a purchase request (admins & department managers). */
@@ -281,13 +250,14 @@ export async function decidePurchaseRequest(id: string, approve: boolean, note?:
 
   const t = say(isOrderLine);
   const head = approve ? t.approved : t.rejected;
-  await supabase.from('notifications').insert({
-    company_id: req.company_id, user_id: req.requester_id, type: 'custom',
-    payload: { title: head, body: `${req.title}${note ? ` · ${note}` : ''}`, url: '/purchasing' }
+  await notifyUser(supabase, {
+    companyId: req.company_id, userId: req.requester_id,
+    title: head, body: `${req.title}${note ? ` · ${note}` : ''}`, url: '/purchasing'
   });
-  pushToUsers([req.requester_id], { title: head, body: req.title, url: '/purchasing' }).catch(() => {});
 
   revalidatePath('/purchasing');
+  revalidatePath('/notifications');
+  revalidatePath('/', 'layout');
   return { ok: true };
 }
 
@@ -313,13 +283,14 @@ export async function completePurchaseRequest(id: string) {
   if (!updated?.length) return { error: 'Bu talep az önce başka biri tarafından güncellendi.' };
 
   const done = say(isOrderLine).done;
-  await supabase.from('notifications').insert({
-    company_id: req.company_id, user_id: req.requester_id, type: 'custom',
-    payload: { title: done, body: req.title, url: '/purchasing' }
+  await notifyUser(supabase, {
+    companyId: req.company_id, userId: req.requester_id,
+    title: done, body: req.title, url: '/purchasing'
   });
-  pushToUsers([req.requester_id], { title: done, body: req.title, url: '/purchasing' }).catch(() => {});
 
   revalidatePath('/purchasing');
+  revalidatePath('/notifications');
+  revalidatePath('/', 'layout');
   return { ok: true };
 }
 

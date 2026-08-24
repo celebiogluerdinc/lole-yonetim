@@ -28,6 +28,9 @@ function linkFor(n: any): string | null {
   const p = n.payload ?? {};
   if (p.task_id) return `/tasks/${p.task_id}`;
   if (p.conversation_id) return `/messages/${p.conversation_id}`;
+  // satın alma / sipariş / ödeme / olay kaydı bildirimleri kendi adresini taşır.
+  // Güvenlik: yalnızca uygulama içi ("/" ile başlayan) adresler kabul edilir.
+  if (typeof p.url === 'string' && p.url.startsWith('/') && !p.url.startsWith('//')) return p.url;
   if (n.type === 'announcement') return '/announcements';
   return null;
 }

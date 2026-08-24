@@ -17,25 +17,42 @@ function log(supabase: any, companyId: string | null, actorId: string, entity_ty
   });
 }
 
-/** dept managers + company admins → in-app notification + push. Two parallel lookups, one insert. */
+/**
+ * Görev bildirimleri: departman müdürleri + TÜM adminler ve süper yöneticiler.
+ * Adminler tüm şirketlerde yetkili olduğu için şirketten bağımsız bulunmaları
+ * gerekir — bunu `decider_ids()` yapar (bkz. 0019_notifications_fix.sql).
+ * RPC yoksa (SQL henüz çalıştırılmadıysa) eski yönteme düşer, bildirim kaybolmaz.
+ */
 async function notifyManagers(supabase: any, task: any, type: string, payload: any) {
-  const [mgrsRes, adminsRes] = await Promise.all([
+  const [mgrsRes, deciderRes] = await Promise.all([
     task.department_id
       ? supabase.from('department_members').select('user_id')
           .eq('department_id', task.department_id).eq('is_manager', true)
       : Promise.resolve({ data: [] } as any),
-    supabase.from('profiles').select('id')
-      .eq('company_id', task.company_id).eq('role', 'admin')
+    supabase.rpc('decider_ids', { cid: task.company_id })
   ]);
-  const targets = new Set<string>([
-    ...((mgrsRes.data ?? []) as any[]).map(m => m.user_id),
-    ...((adminsRes.data ?? []) as any[]).map(a => a.id)
-  ]);
+
+  const targets = new Set<string>(
+    ((mgrsRes.data ?? []) as any[]).map(m => m.user_id)
+  );
+
+  if (deciderRes?.error) {
+    // yedek yol: en azından o şirketin adminleri
+    const { data: admins } = await supabase.from('profiles').select('id')
+      .eq('company_id', task.company_id).eq('role', 'admin');
+    for (const a of (admins ?? []) as any[]) targets.add(a.id);
+  } else {
+    for (const r of (deciderRes?.data ?? []) as any[]) {
+      targets.add(typeof r === 'string' ? r : r.user_id);
+    }
+  }
+
   if (!targets.size) return;
   const ids = Array.from(targets);
-  await supabase.from('notifications').insert(
+  const { error } = await supabase.from('notifications').insert(
     ids.map(user_id => ({ company_id: task.company_id, user_id, type, payload }))
   );
+  if (error) console.error('[bildirim] görev bildirimi yazılamadı:', error.message);
   pushToUsers(ids, {
     title: PUSH_TITLES[type] ?? 'Lole Yönetim',
     body: `${payload.title ?? ''}${payload.by ? ` — ${payload.by}` : ''}`,
@@ -165,9 +182,12 @@ export async function managerSetTaskStatus(taskId: string, status: 'completed' |
   const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).maybeSingle();
   if (!task) return { error: 'Görev bulunamadı.' };
 
+  // YETKİ KURALI: Adminler ve süper yöneticiler TÜM şirketlerde tam yetkilidir
+  // (bkz. 0012_admins_full_access.sql). Adminin kendi kayıtlı olduğu şirkete
+  // bakmak, başka bir şirkete geçtiğinde görev bitirmesini/iptal etmesini
+  // engelliyordu — bu kontrol kaldırıldı.
   const allowed =
-    profile.role === 'super_admin' ||
-    (profile.role === 'admin' && (!profile.company_id || task.company_id === profile.company_id)) ||
+    ['super_admin', 'admin'].includes(profile.role) ||
     (task.department_id && managedDepartmentIds.includes(task.department_id));
   if (!allowed) return { error: 'Bu görev üzerinde yetkiniz yok.' };
   if (['completed', 'cancelled'].includes(task.status) && task.status === status) return { ok: true };

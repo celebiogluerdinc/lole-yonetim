@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
-import { pushToUsers } from '@/lib/push';
+import { notifyDeciders, notifyUser } from '@/lib/notify';
 
 /** Müdürler (admin değil) yalnızca KENDİ departman kapsamındaki talepleri sonuçlandırabilir. */
 async function managerInScope(
@@ -18,27 +18,6 @@ async function managerInScope(
     .in('department_id', managedDepartmentIds)
     .limit(1);
   return !!shared?.length;
-}
-
-async function notifyDeciders(supabase: any, companyId: string, exceptId: string, title: string, body: string, url: string) {
-  const [adminsRes, mgrsRes] = await Promise.all([
-    supabase.from('profiles').select('id').eq('company_id', companyId).eq('role', 'admin'),
-    supabase.from('department_members')
-      .select('user_id, departments!inner(company_id)')
-      .eq('is_manager', true)
-      .eq('departments.company_id', companyId)
-  ]);
-  const targets = new Set<string>([
-    ...((adminsRes.data ?? []) as any[]).map(a => a.id),
-    ...((mgrsRes.data ?? []) as any[]).map(m => m.user_id)
-  ]);
-  targets.delete(exceptId);
-  if (!targets.size) return;
-  const ids = Array.from(targets);
-  await supabase.from('notifications').insert(ids.map(user_id => ({
-    company_id: companyId, user_id, type: 'custom', payload: { title, body, url }
-  })));
-  pushToUsers(ids, { title, body, url }).catch(() => {});
 }
 
 /** "12.500,50" / "12500.50" / "1,500.75" → doğru sayı (son ayırıcı ondalıktır). */
@@ -153,13 +132,17 @@ export async function createPaymentRequest(formData: FormData) {
   }
 
   const amountTxt = v.amount ? ` · ${v.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} TL` : '';
-  await notifyDeciders(supabase, companyId, profile.id,
-    '💸 Yeni ödeme talebi',
-    `${profile.full_name}: ${i.firm_name} — ${i.work_title}${amountTxt}`,
-    '/payments');
+  const notified = await notifyDeciders(supabase, {
+    companyId, exceptId: profile.id,
+    title: '💸 Yeni ödeme talebi',
+    body: `${profile.full_name}: ${i.firm_name} — ${i.work_title}${amountTxt}`,
+    url: '/payments'
+  });
 
   revalidatePath('/payments');
-  return { ok: true, templateSaved };
+  revalidatePath('/notifications');
+  revalidatePath('/', 'layout');
+  return { ok: true, templateSaved, notified };
 }
 
 /** Approve / reject a payment request (admins & department managers). */
@@ -189,20 +172,16 @@ export async function decidePaymentRequest(id: string, approve: boolean, note?: 
   if (error) return { error: error.message };
   if (!updated?.length) return { error: 'Bu talep az önce başka biri tarafından sonuçlandırıldı.' };
 
-  await supabase.from('notifications').insert({
-    company_id: req.company_id, user_id: req.requester_id, type: 'custom',
-    payload: {
-      title: approve ? '✅ Ödeme talebiniz onaylandı' : '❌ Ödeme talebiniz reddedildi',
-      body: `${req.firm_name} — ${req.work_title}${note ? ` · ${note}` : ''}`,
-      url: '/payments'
-    }
-  });
-  pushToUsers([req.requester_id], {
+  await notifyUser(supabase, {
+    companyId: req.company_id, userId: req.requester_id,
     title: approve ? '✅ Ödeme talebiniz onaylandı' : '❌ Ödeme talebiniz reddedildi',
-    body: `${req.firm_name} — ${req.work_title}`, url: '/payments'
-  }).catch(() => {});
+    body: `${req.firm_name} — ${req.work_title}${note ? ` · ${note}` : ''}`,
+    url: '/payments'
+  });
 
   revalidatePath('/payments');
+  revalidatePath('/notifications');
+  revalidatePath('/', 'layout');
   return { ok: true };
 }
 
@@ -225,15 +204,14 @@ export async function completePaymentRequest(id: string) {
   if (error) return { error: error.message };
   if (!updated?.length) return { error: 'Bu talep az önce başka biri tarafından güncellendi.' };
 
-  await supabase.from('notifications').insert({
-    company_id: req.company_id, user_id: req.requester_id, type: 'custom',
-    payload: { title: '🏁 Ödeme tamamlandı', body: `${req.firm_name} — ${req.work_title}`, url: '/payments' }
-  });
-  pushToUsers([req.requester_id], {
+  await notifyUser(supabase, {
+    companyId: req.company_id, userId: req.requester_id,
     title: '🏁 Ödeme tamamlandı', body: `${req.firm_name} — ${req.work_title}`, url: '/payments'
-  }).catch(() => {});
+  });
 
   revalidatePath('/payments');
+  revalidatePath('/notifications');
+  revalidatePath('/', 'layout');
   return { ok: true };
 }
 
