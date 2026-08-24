@@ -331,7 +331,14 @@ export default function PurchasingClient({
                 const r = await createPurchaseRequest(fd);
                 if (r?.error) setError(r.error);
                 else {
-                  setOk(r.templateSaved ? T.createdTpl : T.created);
+                  // kaç yöneticiye bildirim gittiğini açıkça göster —
+                  // bildirim sessizce düşerse hemen fark edilsin
+                  const kime = typeof r.notified === 'number'
+                    ? (r.notified > 0
+                        ? ` ${r.notified} yöneticiye bildirim gitti.`
+                        : ' ⚠️ Bildirim gönderilecek yönetici bulunamadı.')
+                    : '';
+                  setOk((r.templateSaved ? T.createdTpl : T.created) + kime);
                   setFormOpen(false);
                   setRows([emptyRow()]);
                   router.refresh();
@@ -541,8 +548,18 @@ export default function PurchasingClient({
                                 isOrder ? ' Teslim tarihi boş kalır — tarih gerekiyorsa yeni sipariş formunu kullanın.' : ''}`,
                               okText: isOrder ? 'Sipariş Ver' : 'Oluştur'
                             });
-                            if (yes) run(() => reorderPurchaseRequest(r.id),
-                              isOrder ? 'Sipariş tekrar verildi.' : 'Talep tekrar oluşturuldu.');
+                            if (yes) run(async () => {
+                              const res = await reorderPurchaseRequest(r.id);
+                              if (!res?.error) {
+                                setOk((isOrder ? 'Sipariş tekrar verildi.' : 'Talep tekrar oluşturuldu.')
+                                  + (typeof res.notified === 'number'
+                                      ? (res.notified > 0
+                                          ? ` ${res.notified} yöneticiye bildirim gitti.`
+                                          : ' ⚠️ Bildirim gönderilecek yönetici bulunamadı.')
+                                      : ''));
+                              }
+                              return res;
+                            });
                           }}
                           className="btn-outline text-sm">
                           <RefreshCw size={14} /> {isOrder ? 'Aynısını Tekrar Sipariş Ver' : 'Aynısını Tekrar Talep Et'}
