@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { chunkedIn } from '@/lib/db';
 
 /** Returns a Turkish error string when the caller is not an admin, else null. */
 function requireAdmin(role: string): string | null {
@@ -425,11 +426,12 @@ export async function restoreBackup(formData: FormData) {
     if (safe.length && ['departments', 'templates', 'tasks', 'announcements', 'notes', 'shifts', 'leave_requests', 'time_entries'].includes(table)) {
       const ids = safe.map((r: any) => r.id);
       const foreign = new Set<string>();
-      for (let i = 0; i < ids.length; i += 500) {
-        const { data: clash } = await admin.from(table)
-          .select('id').in('id', ids.slice(i, i + 500)).neq('company_id', companyId);
-        for (const c of clash ?? []) foreign.add(c.id);
-      }
+      // 500'lük listeler adres satırını taşırıyordu → parçalı sorgu
+      const clash = await chunkedIn<any>(
+        chunk => admin.from(table).select('id').in('id', chunk).neq('company_id', companyId),
+        ids
+      );
+      for (const c of clash) foreign.add(c.id);
       safe = safe.filter((r: any) => !foreign.has(r.id));
     }
     for (let i = 0; i < safe.length; i += 500) {

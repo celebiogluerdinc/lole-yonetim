@@ -1,12 +1,13 @@
 import { redirect } from 'next/navigation';
 import { getCtx } from '@/lib/auth';
 import { TZ } from '@/lib/utils';
+import { chunkedIn, selectAll } from '@/lib/db';
 import MeetingsClient from '@/components/MeetingsClient';
 
 export const dynamic = 'force-dynamic';
 
-// VERİ POLİTİKASI: toplantı kayıtları silinmez / gizlenmez — tamamı listelenir.
-const PAGE_SIZE = 1000;
+// VERİ POLİTİKASI: toplantı kayıtları silinmez / gizlenmez — tamamı listelenir
+// (sayfa sayfa okunur, 1000 satır sınırına takılmaz).
 
 export default async function MeetingsPage() {
   const { supabase, profile, companyId } = await getCtx();
@@ -16,29 +17,31 @@ export default async function MeetingsPage() {
 
   // RLS güvencesi: davetli olmayan kullanıcı toplantıyı göremez.
   // Admin + süper yönetici iş takibi için tüm toplantıları görür.
-  const { data: rows } = await supabase
+  const rows = await selectAll<any>(() => supabase
     .from('meetings')
     .select('*, creator:created_by(full_name), departments:department_id(name)')
     .eq('company_id', companyId)
     .order('meeting_at', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
-    .limit(PAGE_SIZE);
+    .order('id', { ascending: true }));
 
-  const ids = (rows ?? []).map((r: any) => r.id);
+  const ids = rows.map((r: any) => r.id);
 
-  const [partsRes, notesRes, usersRes, deptsRes] = await Promise.all([
-    ids.length
-      ? supabase.from('meeting_participants')
-          .select('meeting_id, user_id, is_organizer, profiles:user_id(full_name)')
-          .in('meeting_id', ids)
-      : Promise.resolve({ data: [] } as any),
-    ids.length
-      ? supabase.from('meeting_notes')
-          .select('*, author:author_id(full_name)')
-          .in('meeting_id', ids)
-          .order('created_at', { ascending: true })
-          .limit(5000)
-      : Promise.resolve({ data: [] } as any),
+  // toplantı sayısı büyüdüğünde tek istekte gönderilemez → parçalı sorgu
+  const [parts, notes, usersRes, deptsRes] = await Promise.all([
+    chunkedIn<any>(
+      chunk => supabase.from('meeting_participants')
+        .select('meeting_id, user_id, is_organizer, profiles:user_id(full_name)')
+        .in('meeting_id', chunk),
+      ids
+    ),
+    chunkedIn<any>(
+      chunk => supabase.from('meeting_notes')
+        .select('*, author:author_id(full_name)')
+        .in('meeting_id', chunk)
+        .order('created_at', { ascending: true }),
+      ids
+    ),
     supabase.from('profiles')
       .select('id, full_name, role')
       .eq('company_id', companyId).eq('is_active', true)
@@ -64,7 +67,7 @@ export default async function MeetingsPage() {
     : '';
 
   const partsByMtg: Record<string, { id: string; name: string; organizer: boolean }[]> = {};
-  for (const p of (partsRes.data ?? []) as any[]) {
+  for (const p of parts) {
     (partsByMtg[p.meeting_id] ??= []).push({
       id: p.user_id,
       name: p.profiles?.full_name ?? '—',
@@ -73,7 +76,7 @@ export default async function MeetingsPage() {
   }
 
   const notesByMtg: Record<string, any[]> = {};
-  for (const n of (notesRes.data ?? []) as any[]) {
+  for (const n of notes) {
     (notesByMtg[n.meeting_id] ??= []).push({
       id: n.id,
       body: n.body,
@@ -83,7 +86,7 @@ export default async function MeetingsPage() {
     });
   }
 
-  const meetings = (rows ?? []).map((r: any) => ({
+  const meetings = rows.map((r: any) => ({
     id: r.id,
     title: r.title,
     description: r.description,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { aiEnabled, writeWeeklyReport, logRun } from '@/lib/ai';
 import { pushToUsers } from '@/lib/push';
+import { chunkedIn } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -42,10 +43,11 @@ export async function GET(req: NextRequest) {
       .gte('due_at', since.toISOString());
     if (!tasks?.length) { results[c.name] = 'no data'; continue; }
 
-    const { data: asg } = await admin
-      .from('task_assignees')
-      .select('task_id, profiles:user_id(full_name)')
-      .in('task_id', tasks.map((t: any) => t.id));
+    // görev sayısı yüzleri geçtiğinde tek istekte gönderilemez → parçalı sorgu
+    const asg = await chunkedIn<any>(
+      ids => admin.from('task_assignees').select('task_id, profiles:user_id(full_name)').in('task_id', ids),
+      tasks.map((t: any) => t.id)
+    );
 
     const classify = (t: any) => {
       if (t.status === 'completed') {
@@ -58,7 +60,7 @@ export async function GET(req: NextRequest) {
     const perPerson: Record<string, Record<string, number>> = {};
     const taskMap: Record<string, any> = {};
     for (const t of tasks) { taskMap[t.id] = t; counts[classify(t)] = (counts[classify(t)] ?? 0) + 1; }
-    for (const a of asg ?? []) {
+    for (const a of asg) {
       const t = taskMap[a.task_id]; if (!t) continue;
       const nm = (a as any).profiles?.full_name ?? '?';
       (perPerson[nm] ??= {})[classify(t)] = ((perPerson[nm] ??= {})[classify(t)] ?? 0) + 1;

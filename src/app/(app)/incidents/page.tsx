@@ -1,12 +1,13 @@
 import { redirect } from 'next/navigation';
 import { getCtx } from '@/lib/auth';
 import { TZ } from '@/lib/utils';
+import { chunkedIn, selectAll } from '@/lib/db';
 import IncidentsClient from '@/components/IncidentsClient';
 
 export const dynamic = 'force-dynamic';
 
-// VERİ POLİTİKASI: olay kayıtları silinmez / gizlenmez — tamamı listelenir.
-const PAGE_SIZE = 1000;
+// VERİ POLİTİKASI: olay kayıtları silinmez / gizlenmez — tamamı listelenir
+// (sayfa sayfa okunur, 1000 satır sınırına takılmaz).
 
 export default async function IncidentsPage() {
   const { supabase, profile, companyId } = await getCtx();
@@ -15,23 +16,25 @@ export default async function IncidentsPage() {
   const isAdmin = ['super_admin', 'admin'].includes(profile.role);
 
   // RLS güvencesi: personel yalnızca KENDİ kaydını görür, aksiyon raporlarını göremez.
-  const { data: rows } = await supabase
+  const rows = await selectAll<any>(() => supabase
     .from('incidents')
     .select('*, reporter:reporter_id(full_name), approver:approved_by(full_name), departments:department_id(name)')
     .eq('company_id', companyId)
     .order('created_at', { ascending: false })
-    .limit(PAGE_SIZE);
+    .order('id', { ascending: true }));
 
-  const ids = (rows ?? []).map((r: any) => r.id);
+  const ids = rows.map((r: any) => r.id);
   let actions: any[] = [];
   if (isAdmin && ids.length) {
-    const { data } = await supabase
-      .from('incident_actions')
-      .select('*, author:author_id(full_name)')
-      .in('incident_id', ids)
-      .order('created_at', { ascending: true })
-      .limit(5000);
-    actions = data ?? [];
+    // kayıt sayısı büyüdüğünde tek istekte gönderilemez → parçalı sorgu
+    actions = await chunkedIn<any>(
+      chunk => supabase
+        .from('incident_actions')
+        .select('*, author:author_id(full_name)')
+        .in('incident_id', chunk)
+        .order('created_at', { ascending: true }),
+      ids
+    );
   }
 
   const { data: depts } = await supabase
@@ -55,7 +58,7 @@ export default async function IncidentsPage() {
     });
   }
 
-  const incidents = (rows ?? []).map((r: any) => ({
+  const incidents = rows.map((r: any) => ({
     id: r.id,
     title: r.title,
     body: r.body,

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCtx } from '@/lib/auth';
+import { chunkedIn, selectAll } from '@/lib/db';
 import PrintButton from '@/components/PrintButton';
 import { CheckCircle2, Clock, AlertCircle, Inbox } from 'lucide-react';
 
@@ -71,20 +72,33 @@ export default async function PerformancePage({
   const isManager = isAdmin || managedDepartmentIds.length > 0;
 
   // ---- fetch tasks in scope (RLS already limits visibility; we filter further) ----
-  let q = supabase
-    .from('tasks')
-    .select('id, title, status, due_at, completed_at, created_at, priority, department_id')
-    .eq('company_id', companyId)
-    .not('due_at', 'is', null);
-  if (since) q = q.gte('due_at', since);
-  if (!isAdmin && isManager) q = q.in('department_id', managedDepartmentIds);
-  const { data: allTasks } = isManager
-    ? await q
-    : await supabase
-        .from('task_assignees')
-        .select('tasks!inner(id, title, status, due_at, completed_at, created_at, priority, department_id)')
-        .eq('user_id', profile.id)
-        .then(r => ({ data: (r.data ?? []).map((x: any) => x.tasks).filter((t: any) => t.due_at && (!since || t.due_at >= since)) }));
+  // her çağrıda YENİ sorgu üretilir — aynı sorgu nesnesi sayfalanamaz
+  const buildTaskQuery = () => {
+    let x = supabase
+      .from('tasks')
+      .select('id, title, status, due_at, completed_at, created_at, priority, department_id')
+      .eq('company_id', companyId)
+      .not('due_at', 'is', null)
+      .order('due_at', { ascending: false })
+      .order('id', { ascending: true }); // sayfalamada tekrar/atlama olmasın
+    if (since) x = x.gte('due_at', since);
+    if (!isAdmin && isManager) x = x.in('department_id', managedDepartmentIds);
+    return x;
+  };
+  // personelin KENDİ görevleri de sayfalanır — çok görevli kişide liste eksik kalmasın
+  const buildMyTaskQuery = () => {
+    let x = supabase
+      .from('task_assignees')
+      .select('task_id, tasks!inner(id, title, status, due_at, completed_at, created_at, priority, department_id)')
+      .eq('user_id', profile.id)
+      .not('tasks.due_at', 'is', null)
+      .order('task_id', { ascending: true });
+    if (since) x = x.gte('tasks.due_at', since);
+    return x;
+  };
+  const allTasks = isManager
+    ? await selectAll<any>(buildTaskQuery)
+    : (await selectAll<any>(buildMyTaskQuery)).map((x: any) => x.tasks).filter(Boolean);
 
   const tasks = (allTasks ?? []) as any[];
   const taskIds = tasks.map(t => t.id);
@@ -98,15 +112,19 @@ export default async function PerformancePage({
   if (since && isManager) {
     const days = Number(period);
     const prevSince = new Date(now - 2 * days * 86400000).toISOString();
-    let pq = supabase.from('tasks')
-      .select('status, due_at, completed_at')
-      .eq('company_id', companyId)
-      .not('due_at', 'is', null)
-      .gte('due_at', prevSince).lt('due_at', since);
-    if (!isAdmin) pq = pq.in('department_id', managedDepartmentIds);
-    const { data: prevTasks } = await pq;
+    const buildPrev = () => {
+      let x = supabase.from('tasks')
+        .select('status, due_at, completed_at')
+        .eq('company_id', companyId)
+        .not('due_at', 'is', null)
+        .gte('due_at', prevSince).lt('due_at', since)
+        .order('due_at', { ascending: false });
+      if (!isAdmin) x = x.in('department_id', managedDepartmentIds);
+      return x;
+    };
+    const prevTasks = await selectAll<any>(buildPrev);
     const pb = emptyBucket();
-    for (const t of prevTasks ?? []) add(pb, classify(t, now));
+    for (const t of prevTasks) add(pb, classify(t, now));
     prevRateVal = rate(pb);
   }
 
@@ -129,11 +147,16 @@ export default async function PerformancePage({
   let perDept: { name: string; b: Bucket }[] = [];
   if (isManager && taskIds.length) {
     const sinceDate = (since ?? new Date(now - 365 * 86400000).toISOString()).slice(0, 10);
-    const [{ data: asg }, { data: depts }, { data: leaves }] = await Promise.all([
-      supabase
-        .from('task_assignees')
-        .select('task_id, user_id, profiles:user_id(full_name)')
-        .in('task_id', taskIds),
+    const [asg, { data: depts }, { data: leaves }] = await Promise.all([
+      // DİKKAT: burada yüzlerce görev kimliği olabilir. Tek istekte gönderilirse
+      // adres satırı taşar ve sorgu sessizce boş döner → personel listesi kaybolur.
+      chunkedIn<any>(
+        ids => supabase
+          .from('task_assignees')
+          .select('task_id, user_id, profiles:user_id(full_name)')
+          .in('task_id', ids),
+        taskIds
+      ),
       supabase.from('departments').select('id, name').eq('company_id', companyId),
       // dönem içindeki onaylı izinler → adil performans okuması
       supabase.from('leave_requests')
@@ -152,7 +175,7 @@ export default async function PerformancePage({
     const byUser: Record<string, { name: string; b: Bucket; leaveDays: number }> = {};
     const taskMap: Record<string, any> = {};
     for (const t of tasks) taskMap[t.id] = t;
-    for (const a of asg ?? []) {
+    for (const a of asg) {
       const t = taskMap[a.task_id];
       if (!t) continue;
       const name = (a as any).profiles?.full_name ?? 'Kullanıcı';
@@ -180,13 +203,17 @@ export default async function PerformancePage({
   let trend: { label: string; done: number; late: number }[] = [];
   if (isManager) {
     const eightWeeksAgo = new Date(now - 8 * 7 * 86400000).toISOString();
-    let tq = supabase.from('tasks')
-      .select('completed_at, due_at')
-      .eq('company_id', companyId)
-      .eq('status', 'completed')
-      .gte('completed_at', eightWeeksAgo);
-    if (!isAdmin) tq = tq.in('department_id', managedDepartmentIds);
-    const { data: doneTasks } = await tq;
+    const buildTrend = () => {
+      let x = supabase.from('tasks')
+        .select('completed_at, due_at')
+        .eq('company_id', companyId)
+        .eq('status', 'completed')
+        .gte('completed_at', eightWeeksAgo)
+        .order('completed_at', { ascending: true });
+      if (!isAdmin) x = x.in('department_id', managedDepartmentIds);
+      return x;
+    };
+    const doneTasks = await selectAll<any>(buildTrend);
     const weeks: { start: Date; done: number; late: number }[] = [];
     const monday = (d: Date) => {
       const x = new Date(d);
@@ -196,7 +223,7 @@ export default async function PerformancePage({
     };
     const w0 = monday(new Date(now - 7 * 7 * 86400000));
     for (let i = 0; i < 8; i++) weeks.push({ start: new Date(w0.getTime() + i * 7 * 86400000), done: 0, late: 0 });
-    for (const t of doneTasks ?? []) {
+    for (const t of doneTasks) {
       const ts = new Date(t.completed_at).getTime();
       const idx = Math.floor((ts - w0.getTime()) / (7 * 86400000));
       if (idx >= 0 && idx < 8) {

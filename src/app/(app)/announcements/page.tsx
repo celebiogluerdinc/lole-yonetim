@@ -1,6 +1,7 @@
 import { getCtx } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { fmtDate } from '@/lib/utils';
+import { chunkedIn, selectAll } from '@/lib/db';
 import AnnouncementComposer from '@/components/AnnouncementComposer';
 import AnnouncementActions from '@/components/AnnouncementActions';
 import AnnouncementComments, { type AnnComment } from '@/components/AnnouncementComments';
@@ -15,22 +16,22 @@ export default async function AnnouncementsPage() {
 
   const canPost = ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
 
-  const [{ data: anns }, { data: myReads }, { data: depts }, { data: allComments }] = await Promise.all([
-    supabase.from('announcements').select('*, profiles:author_id(full_name)')
+  const [anns, { data: myReads }, { data: depts }, allComments] = await Promise.all([
+    selectAll<any>(() => supabase.from('announcements').select('*, profiles:author_id(full_name)')
       .eq('company_id', companyId)
       .order('is_pinned', { ascending: false })
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false })),
     supabase.from('announcement_reads').select('announcement_id').eq('user_id', profile.id),
     supabase.from('departments').select('id, name').eq('company_id', companyId),
-    supabase.from('announcement_comments')
+    // yorumların tamamı okunur (1000 satır sınırı aşılır)
+    selectAll<any>(() => supabase.from('announcement_comments')
       .select('*, profiles:author_id(full_name)')
       .eq('company_id', companyId)
-      .order('created_at')
-      .limit(2000)
+      .order('created_at', { ascending: true }))
   ]);
 
   const commentsByAnn: Record<string, AnnComment[]> = {};
-  for (const c of allComments ?? []) (commentsByAnn[c.announcement_id] ??= []).push(c as any);
+  for (const c of allComments) (commentsByAnn[c.announcement_id] ??= []).push(c as any);
 
   const readSet = new Set((myReads ?? []).map((r: any) => r.announcement_id));
   const deptName: Record<string, string> = {};
@@ -38,15 +39,15 @@ export default async function AnnouncementsPage() {
 
   // read counts for authors/admins
   let readCounts: Record<string, number> = {};
-  if (canPost && (anns ?? []).length) {
-    const { data: allReads } = await supabase
-      .from('announcement_reads')
-      .select('announcement_id')
-      .in('announcement_id', (anns ?? []).map(a => a.id));
-    for (const r of allReads ?? []) readCounts[r.announcement_id] = (readCounts[r.announcement_id] ?? 0) + 1;
+  if (canPost && anns.length) {
+    const allReads = await chunkedIn<any>(
+      chunk => supabase.from('announcement_reads').select('announcement_id').in('announcement_id', chunk),
+      anns.map(a => a.id)
+    );
+    for (const r of allReads) readCounts[r.announcement_id] = (readCounts[r.announcement_id] ?? 0) + 1;
   }
 
-  const unreadIds = (anns ?? []).filter(a => !readSet.has(a.id)).map(a => a.id);
+  const unreadIds = anns.filter(a => !readSet.has(a.id)).map(a => a.id);
 
   const postableDepts = ['super_admin', 'admin'].includes(profile.role)
     ? (depts ?? [])
@@ -74,10 +75,10 @@ export default async function AnnouncementsPage() {
       )}
 
       <div className="space-y-4 mt-6">
-        {(anns ?? []).length === 0 && (
+        {anns.length === 0 && (
           <div className="card p-10 text-center text-sm text-[#8E8E93]">Henüz duyuru yok.</div>
         )}
-        {(anns ?? []).map(a => (
+        {anns.map(a => (
           <article key={a.id} className={`card p-5 ${a.is_pinned ? 'border-brand-500/30 bg-brand-500/10' : ''}`}>
             <div className="flex items-start justify-between gap-3">
               <h2 className="font-semibold flex items-center gap-2">
