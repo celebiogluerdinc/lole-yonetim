@@ -1,0 +1,205 @@
+'use client';
+
+import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { ChevronDown, KeyRound } from 'lucide-react';
+import { updateUser, toggleUserActive } from '@/app/(app)/admin/actions';
+import { ROLE_LABEL } from '@/lib/utils';
+
+interface Dept { id: string; name: string; }
+export interface ManagedUser {
+  id: string; full_name: string; email: string; role: string; is_active: boolean;
+  leave_allowance?: number;
+  is_customer?: boolean;
+  customer_name?: string;
+  memberIds: string[];    // departments the user belongs to
+  managerIds: string[];   // departments the user manages
+}
+
+export default function UserManage({
+  user, departments, meId, meIsSuper = false, isOrderLine = false
+}: { user: ManagedUser; departments: Dept[]; meId: string; meIsSuper?: boolean; isOrderLine?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const [isCustomer, setIsCustomer] = useState(user.is_customer === true);
+  const [pending, start] = useTransition();
+  const router = useRouter();
+  const isSelf = user.id === meId;
+
+  const deptNames = departments
+    .filter(d => user.memberIds.includes(d.id) || user.managerIds.includes(d.id))
+    .map(d => `${d.name}${user.managerIds.includes(d.id) ? ' (Müdür)' : ''}`)
+    .join(', ');
+
+  return (
+    <div>
+      {/* Row — click to edit */}
+      <button
+        onClick={() => { setOpen(v => !v); setError(null); setOk(null); }}
+        className="w-full flex items-center gap-3 p-4 hover:bg-white/[0.04] transition-colors text-left"
+      >
+        <div className="w-9 h-9 rounded-full bg-ios-blue/15 text-ios-blue flex items-center justify-center text-sm font-bold shrink-0">
+          {(user.full_name || user.email)[0]?.toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-medium truncate ${user.is_active ? '' : 'text-[#8E8E93] line-through'}`}>
+            {user.full_name || user.email}{isSelf ? ' (siz)' : ''}
+          </p>
+          <p className="text-xs text-[#8E8E93] truncate">
+            {user.is_customer ? `📦 Müşteri${user.customer_name ? ` · ${user.customer_name}` : ''}` : ROLE_LABEL[user.role]}
+            {' · '}{user.email}{deptNames ? ` · ${deptNames}` : ''}
+          </p>
+        </div>
+        <ChevronDown size={16} className={`text-[#8E8E93] shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* Editor */}
+      {open && (
+        <form
+          action={(fd) => start(async () => {
+            setError(null); setOk(null);
+            fd.set('user_id', user.id);
+            const r = await updateUser(fd);
+            if (r?.error) setError(r.error);
+            else {
+              setOk(r?.password_changed
+                ? 'Kaydedildi. Yeni parolayı kullanıcıya iletin — bir daha görüntülenemez.'
+                : 'Kaydedildi.');
+              router.refresh();
+            }
+          })}
+          className="px-4 pb-5 pt-1 space-y-4 bg-white/[0.03] border-t border-white/[0.06]"
+        >
+          {error && <p className="text-[13px] text-rose-300 bg-rose-500/10 rounded-xl px-3 py-2">{error}</p>}
+          {ok && <p className="text-[13px] text-emerald-300 bg-emerald-500/10 rounded-xl px-3 py-2">✔ {ok}</p>}
+
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Ad Soyad</label>
+              <input name="full_name" defaultValue={user.full_name} required className="input" />
+            </div>
+            <div>
+              <label className="label">Yetki (rol)</label>
+              <select name="role" defaultValue={user.role} disabled={isSelf || isCustomer}
+                className="input disabled:opacity-50">
+                {isOrderLine
+                  ? <option value="manager">Sipariş Sorumlusu (Müdür)</option>
+                  : <>
+                      <option value="staff">Personel</option>
+                      <option value="manager">Müdür</option>
+                    </>}
+                <option value="admin">Admin</option>
+                {(meIsSuper || user.role === 'super_admin') && (
+                  <option value="super_admin">Süper Admin (tüm şirketler)</option>
+                )}
+              </select>
+              {/* disabled select FormData'ya gitmez — değeri açıkça gönderiyoruz */}
+              {(isSelf || isCustomer) && (
+                <input type="hidden" name="role" value={isCustomer ? 'staff' : user.role} />
+              )}
+              {isCustomer && (
+                <p className="text-[11px] text-[#8E8E93] mt-1">Müşteri hesapları daima yetkisizdir.</p>
+              )}
+              {isSelf && <p className="text-[11px] text-[#8E8E93] mt-1">Kendi rolünüzü değiştiremezsiniz.</p>}
+              {meIsSuper && !isSelf && (
+                <p className="text-[11px] text-[#8E8E93] mt-1">
+                  Süper Admin: tüm şirketleri görür ve aralarında geçiş yapabilir.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* ---- LOLE SİPARİŞ HATTI: müşteri hesabı ---- */}
+          {isOrderLine && (
+            <div className="rounded-xl border border-white/[0.10] p-3 space-y-3 bg-white/[0.03]">
+              <label className="flex items-start gap-2.5 text-sm cursor-pointer">
+                <input type="checkbox" name="is_customer" className="rounded accent-[#0A84FF] w-4 h-4 mt-0.5"
+                  checked={isCustomer} onChange={e => setIsCustomer(e.target.checked)} disabled={isSelf} />
+                <span>
+                  <b>📦 Müşteri hesabı</b>
+                  <span className="block text-[12px] text-[#8E8E93]">
+                    Yalnızca kendi siparişlerini görür; şirket verilerine ve diğer müşterilere erişemez.
+                  </span>
+                </span>
+              </label>
+              {isCustomer && (
+                <div>
+                  <label className="label">Müşteri firma adı</label>
+                  <input name="customer_name" defaultValue={user.customer_name ?? ''} className="input"
+                    placeholder="Örn: Yılmaz Market" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isOrderLine && (
+            <div>
+              <label className="label">🏖 Yıllık izin hakkı (gün/yıl)</label>
+              <input name="leave_allowance" type="number" min={0} max={90}
+                defaultValue={user.leave_allowance ?? 14} className="input sm:max-w-[160px]" />
+            </div>
+          )}
+
+          <div>
+            <label className="label flex items-center gap-1.5"><KeyRound size={12} /> Yeni parola belirle</label>
+            <input name="new_password" minLength={8} className="input"
+              placeholder="Boş bırakılırsa parola değişmez (min. 8 karakter)" autoComplete="new-password" />
+            <p className="text-[11px] text-[#8E8E93] mt-1">
+              Güvenlik gereği mevcut parolalar görüntülenemez; buradan yenisini belirleyip kullanıcıya iletebilirsiniz.
+            </p>
+          </div>
+
+          {!isOrderLine && (
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Üye olduğu departmanlar</label>
+              <div className="rounded-xl border border-white/[0.10] p-3 space-y-1.5 max-h-36 overflow-y-auto">
+                {departments.map(d => (
+                  <label key={d.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" name="departments" value={d.id}
+                      defaultChecked={user.memberIds.includes(d.id)} className="rounded accent-[#0A84FF]" />
+                    {d.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="label">Müdürü olduğu departmanlar</label>
+              <div className="rounded-xl border border-white/[0.10] p-3 space-y-1.5 max-h-36 overflow-y-auto">
+                {departments.map(d => (
+                  <label key={d.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" name="manager_departments" value={d.id}
+                      defaultChecked={user.managerIds.includes(d.id)} className="rounded accent-[#0A84FF]" />
+                    {d.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            {!isSelf && (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => start(async () => {
+                  const r = await toggleUserActive(user.id, !user.is_active);
+                  if (r?.error) setError(r.error);
+                  else router.refresh();
+                })}
+                className={`btn-outline ${user.is_active ? '!text-rose-300' : '!text-emerald-300'}`}
+              >
+                {user.is_active ? 'Pasifleştir' : 'Aktifleştir'}
+              </button>
+            )}
+            <button className="btn-primary flex-1" disabled={pending}>
+              {pending ? 'Kaydediliyor…' : 'Değişiklikleri Kaydet'}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
