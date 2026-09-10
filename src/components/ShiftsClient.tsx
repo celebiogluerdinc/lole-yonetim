@@ -142,7 +142,7 @@ export default function ShiftsClient({
           </button>
           {s.series_id && (
             <button title="Tüm seriyi sil" onClick={() => removeSeries(s)}
-              className="w-[18px] h-[18px] rounded-full bg-[#8E8E93] text-white flex items-center justify-center">
+              className="w-[18px] h-[18px] rounded-full bg-[#667085] text-white flex items-center justify-center">
               <Repeat size={9} strokeWidth={3} />
             </button>
           )}

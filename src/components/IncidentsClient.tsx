@@ -4,11 +4,12 @@ import { useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Plus, X, ShieldAlert, ThumbsUp, ThumbsDown, ChevronDown, Lock,
-  ClipboardCheck, Trash2, Pencil, Flag
+  ClipboardCheck, Trash2, Pencil, Flag, Camera, ImagePlus
 } from 'lucide-react';
 import {
   createIncident, decideIncident, closeIncident,
-  addIncidentAction, updateIncidentAction, deleteIncidentAction
+  addIncidentAction, updateIncidentAction, deleteIncidentAction,
+  uploadIncidentPhoto, deleteIncidentPhoto
 } from '@/app/(app)/incidents/actions';
 import PrintButton, { type PrintTable } from '@/components/PrintButton';
 import { useConfirm } from '@/components/ConfirmProvider';
@@ -16,11 +17,13 @@ import { useConfirm } from '@/components/ConfirmProvider';
 interface ActionRow {
   id: string; body: string; author: string; authorId: string; date: string;
 }
+interface Photo { id: string; url: string; name: string; uploaderId: string; }
 interface Incident {
   id: string; title: string; body: string; location: string | null;
   severity: string; status: string; occurred: string; day: string; created: string;
   reporter: string; reporterId: string; dept: string | null;
   approver: string | null; decisionNote: string | null; actions: ActionRow[];
+  photos: Photo[];
 }
 interface Dept { id: string; name: string; }
 
@@ -63,13 +66,28 @@ export default function IncidentsClient({
   const [actionDraft, setActionDraft] = useState<Record<string, string>>({});
   const [editId, setEditId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [newPhotos, setNewPhotos] = useState<File[]>([]);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const addPhotoRef = useRef<HTMLInputElement>(null);
+
+  /** Seçilen fotoğrafları var olan bir olay kaydına yükler. */
+  const sendPhotos = async (incidentId: string, files: File[]): Promise<{ error?: string; ok?: boolean; eklenen?: number }> => {
+    if (!files.length) return { ok: true };
+    const fd = new FormData();
+    fd.set('incident_id', incidentId);
+    for (const f of files) fd.append('photos', f);
+    return await uploadIncidentPhoto(fd);
+  };
 
   const run = (fn: () => Promise<any>, okText?: string) => start(async () => {
     setError(null); setOk(null);
     const r = await fn();
-    if (r?.error) setError(r.error);
-    else { if (okText) setOk(okText); router.refresh(); }
+    if (r?.error) {
+      setError(r.error);
+      // kısmi başarı: bir kısmı yüklendiyse listeyi yine de tazele
+      if (r?.eklenen) router.refresh();
+    } else { if (okText) setOk(okText); router.refresh(); }
   });
 
   const counts = useMemo(() => {
@@ -183,12 +201,19 @@ export default function IncidentsClient({
           action={(fd) => start(async () => {
             setError(null); setOk(null);
             const r = await createIncident(fd);
-            if (r?.error) setError(r.error);
-            else {
-              setOk('Olay kaydı gönderildi — yöneticilere bildirim gitti.');
-              setFormOpen(false);
-              router.refresh();
+            if (r?.error) { setError(r.error); return; }
+
+            let foto = '';
+            if (newPhotos.length && r?.id) {
+              const up = await sendPhotos(r.id, newPhotos);
+              foto = up?.error
+                ? ` Ancak fotoğraflar yüklenemedi: ${up.error}`
+                : ` ${newPhotos.length} fotoğraf eklendi.`;
             }
+            setOk('Olay kaydı gönderildi — yöneticilere bildirim gitti.' + foto);
+            setNewPhotos([]);
+            setFormOpen(false);
+            router.refresh();
           })}
           className="card p-4 space-y-4 border border-ios-blue/25"
         >
@@ -239,6 +264,42 @@ export default function IncidentsClient({
               placeholder="Ne oldu, kimler vardı, nasıl gelişti, hangi önlem alındı…" />
           </div>
 
+          {/* ---- FOTOĞRAF ---- */}
+          <div>
+            <label className="label">Fotoğraflar (en fazla 10)</label>
+            <label className="btn-outline cursor-pointer inline-flex">
+              <Camera size={16} /> Fotoğraf Seç veya Çek
+              <input
+                id="olay-foto-sec"
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={e => {
+                  setNewPhotos(Array.from(e.target.files ?? []).slice(0, 10));
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            {newPhotos.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2.5">
+                {newPhotos.map((f, i) => (
+                  <span key={i} className="badge bg-white/10 text-[#D1D1D6] max-w-[190px]">
+                    <span className="truncate">{f.name}</span>
+                    <button type="button" className="ml-1.5 shrink-0"
+                      onClick={() => setNewPhotos(a => a.filter((_, x) => x !== i))}
+                      aria-label="Fotoğrafı listeden çıkar">
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-[#8E8E93] mt-1.5">
+              Fotoğrafları da yalnızca yönetici ve süper yönetici görebilir.
+            </p>
+          </div>
+
           <div className="flex gap-2">
             <button disabled={pending} className="btn-primary">
               {pending ? 'Gönderiliyor…' : 'Olay Kaydını Gönder'}
@@ -287,6 +348,68 @@ export default function IncidentsClient({
               {open && (
                 <div className="mt-3 pt-3 border-t border-white/[0.08] space-y-3">
                   <p className="text-sm text-[#D1D1D6] whitespace-pre-wrap">{r.body}</p>
+
+                  {/* ---- FOTOĞRAFLAR ---- */}
+                  {(r.photos.length > 0 || isAdmin || r.reporterId === meId) && (
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <h4 className="text-[13px] font-semibold flex items-center gap-2">
+                          <Camera size={14} /> Fotoğraflar
+                          {r.photos.length > 0 && (
+                            <span className="badge bg-white/10 text-[#8E8E93] font-normal">{r.photos.length}</span>
+                          )}
+                        </h4>
+                        {(isAdmin || r.reporterId === meId) && (
+                          <label className="btn-ghost text-sm cursor-pointer !px-2">
+                            <ImagePlus size={15} /> Ekle
+                            <input
+                              type="file" accept="image/*" multiple className="hidden"
+                              onChange={e => {
+                                const files = Array.from(e.target.files ?? []).slice(0, 10);
+                                e.target.value = '';
+                                if (files.length) {
+                                  run(() => sendPhotos(r.id, files), `${files.length} fotoğraf eklendi.`);
+                                }
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+
+                      {r.photos.length === 0 ? (
+                        <p className="text-[12px] text-[#8E8E93]">Bu kayda henüz fotoğraf eklenmemiş.</p>
+                      ) : (
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                          {r.photos.map(ph => (
+                            <div key={ph.id} className="relative group">
+                              <button type="button" onClick={() => setLightbox(ph.url)}
+                                className="block w-full aspect-square rounded-xl overflow-hidden bg-white/[0.05]"
+                                title={ph.name}>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={ph.url} alt={ph.name}
+                                  className="w-full h-full object-cover max-w-full" loading="lazy" />
+                              </button>
+                              {(ph.uploaderId === meId || isAdmin) && (
+                                <button type="button"
+                                  onClick={async () => {
+                                    const yes = await confirmS({
+                                      title: 'Fotoğraf silinsin mi?',
+                                      message: 'Bu fotoğraf kalıcı olarak silinecek.',
+                                      okText: 'Sil', danger: true
+                                    });
+                                    if (yes) run(() => deleteIncidentPhoto(ph.id), 'Fotoğraf silindi.');
+                                  }}
+                                  className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center"
+                                  aria-label="Fotoğrafı sil">
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {r.approver && (
                     <p className="text-[12px] text-[#8E8E93]">
@@ -427,6 +550,25 @@ export default function IncidentsClient({
           );
         })}
       </div>
+
+      {/* ---- TAM EKRAN FOTOĞRAF ---- */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[95] bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+          role="dialog"
+          aria-label="Fotoğraf görüntüleyici"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="Olay fotoğrafı"
+            className="max-w-full max-h-full rounded-xl object-contain" />
+          <button type="button" onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/15 text-white flex items-center justify-center"
+            aria-label="Kapat">
+            <X size={18} />
+          </button>
+        </div>
+      )}
     </main>
   );
 }

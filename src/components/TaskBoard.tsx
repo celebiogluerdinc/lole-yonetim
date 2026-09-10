@@ -230,7 +230,7 @@ export default function TaskBoard({
             key={f.key}
             onClick={() => setFilter(f.key)}
             className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors flex items-center gap-1.5 ${
-              filter === f.key ? 'text-white' : 'bg-[#1C1C1E] text-[#D1D1D6] shadow-[0_0_0_0.5px_rgba(255,255,255,0.09)]'
+              filter === f.key ? 'text-white' : 'bg-[#1C1C1E] text-[#D1D1D6] shadow-[0_0_0_1px_#e3e8f0]'
             }`}
             style={filter === f.key ? { backgroundColor: f.color } : undefined}
           >

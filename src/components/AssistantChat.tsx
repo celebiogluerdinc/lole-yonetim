@@ -44,7 +44,7 @@ export default function AssistantChat({ messages, userName }: { messages: Msg[];
   return (
     <div className="flex flex-col h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))] md:h-dvh max-w-3xl mx-auto w-full">
       {/* Header */}
-      <header className="flex items-center gap-3 px-4 py-3 bg-black/80 backdrop-blur sticky top-0 z-10 border-b border-white/[0.08]">
+      <header className="flex items-center gap-3 px-4 py-3 bg-[#ffffff]/90 backdrop-blur sticky top-0 z-10 border-b border-white/[0.08]">
         <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#5E5CE6] to-[#AF52DE] text-white flex items-center justify-center shrink-0">
           <Sparkles size={18} />
         </span>
@@ -91,7 +91,7 @@ export default function AssistantChat({ messages, userName }: { messages: Msg[];
             <div className={`max-w-[82%] px-3.5 py-2 text-[15px] leading-relaxed whitespace-pre-wrap break-words rounded-2xl ${
               m.role === 'user'
                 ? 'bg-ios-blue text-white rounded-br-[6px]'
-                : 'bg-[#1C1C1E] rounded-bl-[6px] shadow-[0_0_0_0.5px_rgba(255,255,255,0.09)]'
+                : 'bg-[#1C1C1E] rounded-bl-[6px] shadow-[0_0_0_1px_#e3e8f0]'
             }`}>
               {m.content}
             </div>
@@ -110,7 +110,7 @@ export default function AssistantChat({ messages, userName }: { messages: Msg[];
             <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#5E5CE6] to-[#AF52DE] text-white flex items-center justify-center shrink-0 mr-2 mt-1">
               <Sparkles size={13} />
             </span>
-            <div className="px-3.5 py-2.5 rounded-2xl rounded-bl-[6px] bg-[#1C1C1E] shadow-[0_0_0_0.5px_rgba(255,255,255,0.09)]">
+            <div className="px-3.5 py-2.5 rounded-2xl rounded-bl-[6px] bg-[#1C1C1E] shadow-[0_0_0_1px_#e3e8f0]">
               <span className="flex gap-1">
                 <i className="w-1.5 h-1.5 rounded-full bg-[#AEAEB2] animate-bounce [animation-delay:0ms]" />
                 <i className="w-1.5 h-1.5 rounded-full bg-[#AEAEB2] animate-bounce [animation-delay:150ms]" />
@@ -128,7 +128,7 @@ export default function AssistantChat({ messages, userName }: { messages: Msg[];
       {/* Composer */}
       <form
         onSubmit={(e) => { e.preventDefault(); ask(text); }}
-        className="flex items-center gap-2 px-3 py-2.5 bg-black/85 backdrop-blur border-t border-white/[0.08]"
+        className="flex items-center gap-2 px-3 py-2.5 bg-[#ffffff]/92 backdrop-blur border-t border-white/[0.08]"
       >
         <input
           value={text}

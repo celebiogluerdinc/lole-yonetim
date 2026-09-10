@@ -78,7 +78,7 @@ export default function NavLink({
   return (
     <Link href={href}
       className={`flex items-center gap-3 rounded-xl px-2.5 py-2 text-[15px] transition-colors ${
-        active ? 'bg-[#2C2C2E] text-white shadow-sm font-semibold' : 'text-[#D1D1D6] hover:bg-white/[0.07]'}`}>
+        active ? 'bg-[#2C2C2E] text-[#F2F2F7] shadow-sm font-semibold' : 'text-[#D1D1D6] hover:bg-white/[0.07]'}`}>
       <span className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0"
         style={{ backgroundColor: color }}>
         <Icon size={16} strokeWidth={2.2} />
