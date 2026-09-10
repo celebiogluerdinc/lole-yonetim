@@ -6,6 +6,7 @@ import { getCtx } from '@/lib/auth';
 import { notifyDeciders, notifyUser } from '@/lib/notify';
 
 const isAdmin = (role: string) => ['super_admin', 'admin'].includes(role);
+const uuid = z.string().uuid();
 
 const IncidentSchema = z.object({
   title: z.string().min(3).max(200),
@@ -196,6 +197,115 @@ export async function deleteIncidentAction(id: string) {
 
   const { error } = await supabase.from('incident_actions').delete().eq('id', id);
   if (error) return { error: error.message };
+  revalidatePath('/incidents');
+  return { ok: true };
+}
+
+/* ============================================================
+   OLAY KAYDI FOTOĞRAFLARI
+   Fotoğrafı olay kaydını açan kişi (kendi kaydına) ve yöneticiler ekler.
+   Görme yetkisi veritabanı kuralıyla admin + süper yönetici ile sınırlıdır.
+   ============================================================ */
+
+const ALLOWED_IMG = new Set([
+  'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'image/gif'
+]);
+const ALLOWED_IMG_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'gif']);
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const MAX_PHOTOS_PER_INCIDENT = 10;
+
+/** Bir olay kaydına fotoğraf yükler. */
+export async function uploadIncidentPhoto(formData: FormData) {
+  const incidentId = String(formData.get('incident_id') ?? '');
+  if (!uuid.safeParse(incidentId).success) return { error: 'Geçersiz olay kaydı.' };
+
+  const files = formData.getAll('photos').filter(f => f instanceof File) as File[];
+  if (!files.length) return { error: 'Fotoğraf seçilmedi.' };
+
+  const { supabase, profile } = await getCtx();
+
+  const { data: inc } = await supabase.from('incidents')
+    .select('id, company_id, reporter_id').eq('id', incidentId).maybeSingle();
+  if (!inc) return { error: 'Olay kaydı bulunamadı veya erişiminiz yok.' };
+  if (!(isAdmin(profile.role) || inc.reporter_id === profile.id)) {
+    return { error: 'Bu kayda fotoğraf ekleme yetkiniz yok.' };
+  }
+
+  const { count: mevcut } = await supabase.from('incident_photos')
+    .select('id', { count: 'exact', head: true }).eq('incident_id', incidentId);
+  if ((mevcut ?? 0) + files.length > MAX_PHOTOS_PER_INCIDENT) {
+    return { error: `Bir olay kaydına en fazla ${MAX_PHOTOS_PER_INCIDENT} fotoğraf eklenebilir.` };
+  }
+
+  // ÖNCE HEPSİNİ DENETLE, SONRA YÜKLE.
+  // Böylece hatalı bir dosya yüzünden yarısı yüklenmiş bir kayıt oluşmaz.
+  const kabul: { file: File; ext: string }[] = [];
+  for (const file of files) {
+    if (file.size === 0) continue;
+    if (file.size > MAX_PHOTO_BYTES) {
+      return { error: `"${file.name}" 10MB sınırını aşıyor.` };
+    }
+    const ext = (file.name.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+    if (file.type ? !ALLOWED_IMG.has(file.type) : !ALLOWED_IMG_EXT.has(ext)) {
+      return { error: `"${file.name}" bir fotoğraf değil (JPG, PNG, HEIC, WebP kabul edilir).` };
+    }
+    kabul.push({ file, ext });
+  }
+  if (!kabul.length) return { error: 'Fotoğraf seçilmedi.' };
+
+  let eklenen = 0;
+  for (const { file, ext } of kabul) {
+    // 0002'deki depolama kuralı: ilk klasör şirket kimliği olmalı
+    const path = `${inc.company_id}/incidents/${incidentId}/${crypto.randomUUID()}.${ext || 'jpg'}`;
+    const buf = Buffer.from(await file.arrayBuffer());
+    const { error: upErr } = await supabase.storage
+      .from('attachments')
+      .upload(path, buf, { contentType: file.type || 'image/jpeg' });
+    if (upErr) {
+      revalidatePath('/incidents');
+      return { error: `Yükleme başarısız: ${upErr.message}`, eklenen };
+    }
+
+    const { error: rowErr } = await supabase.from('incident_photos').insert({
+      incident_id: incidentId,
+      company_id: inc.company_id,
+      uploaded_by: profile.id,
+      storage_path: path,
+      file_name: file.name.slice(0, 200),
+      mime_type: file.type || null
+    });
+    if (rowErr) {
+      // satır yazılamadıysa dosyayı da bırakma
+      await supabase.storage.from('attachments').remove([path]);
+      revalidatePath('/incidents');
+      return { error: `Fotoğraf kaydedilemedi: ${rowErr.message}`, eklenen };
+    }
+    eklenen++;
+  }
+
+  revalidatePath('/incidents');
+  return { ok: true, eklenen };
+}
+
+/** Fotoğrafı siler (yükleyen kişi ya da süper yönetici). */
+export async function deleteIncidentPhoto(photoId: string) {
+  if (!uuid.safeParse(photoId).success) return { error: 'Geçersiz fotoğraf.' };
+  const { supabase, profile } = await getCtx();
+
+  const { data: ph } = await supabase.from('incident_photos')
+    .select('id, storage_path, uploaded_by').eq('id', photoId).maybeSingle();
+  if (!ph) return { error: 'Fotoğraf bulunamadı.' };
+  // Yükleyen kişi kendi fotoğrafını, yönetici (admin / süper yönetici) her fotoğrafı silebilir.
+  if (ph.uploaded_by !== profile.id && !isAdmin(profile.role)) {
+    return { error: 'Yalnızca kendi eklediğiniz fotoğrafı silebilirsiniz.' };
+  }
+
+  const { data, error } = await supabase.from('incident_photos')
+    .delete().eq('id', photoId).select('id');
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: 'Fotoğraf silinemedi.' };
+
+  await supabase.storage.from('attachments').remove([ph.storage_path]);
   revalidatePath('/incidents');
   return { ok: true };
 }

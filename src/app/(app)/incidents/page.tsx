@@ -40,6 +40,33 @@ export default async function IncidentsPage() {
   const { data: depts } = await supabase
     .from('departments').select('id, name').eq('company_id', companyId).order('name');
 
+  // ---- FOTOĞRAFLAR ----
+  // Satır kuralı (RLS) zaten kimin görebileceğini belirler: yönetici tümünü,
+  // yükleyen kendi eklediğini. Burada yalnızca görüntüleme bağlantısı üretilir.
+  const photoRows = ids.length
+    ? await chunkedIn<any>(
+        chunk => supabase
+          .from('incident_photos')
+          .select('id, incident_id, storage_path, file_name, uploaded_by, created_at')
+          .in('incident_id', chunk)
+          .order('created_at', { ascending: true }),
+        ids
+      )
+    : [];
+
+  const signedByPath: Record<string, string> = {};
+  if (photoRows.length) {
+    const paths = photoRows.map((p: any) => p.storage_path);
+    for (let i = 0; i < paths.length; i += 100) {
+      const { data: urls } = await supabase.storage
+        .from('attachments')
+        .createSignedUrls(paths.slice(i, i + 100), 3600);
+      (urls ?? []).forEach((u: any, k: number) => {
+        if (u?.signedUrl) signedByPath[paths[i + k]] = u.signedUrl;
+      });
+    }
+  }
+
   const fmt = (iso: string) => new Date(iso).toLocaleString('tr-TR', {
     timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
   });
@@ -58,6 +85,18 @@ export default async function IncidentsPage() {
     });
   }
 
+  const photosByInc: Record<string, any[]> = {};
+  for (const p of photoRows) {
+    const url = signedByPath[p.storage_path];
+    if (!url) continue;
+    (photosByInc[p.incident_id] ??= []).push({
+      id: p.id,
+      url,
+      name: p.file_name,
+      uploaderId: p.uploaded_by
+    });
+  }
+
   const incidents = rows.map((r: any) => ({
     id: r.id,
     title: r.title,
@@ -73,7 +112,8 @@ export default async function IncidentsPage() {
     dept: r.departments?.name ?? null,
     approver: r.approver?.full_name ?? null,
     decisionNote: r.decision_note,
-    actions: actionsByInc[r.id] ?? []
+    actions: actionsByInc[r.id] ?? [],
+    photos: photosByInc[r.id] ?? []
   }));
 
   return (

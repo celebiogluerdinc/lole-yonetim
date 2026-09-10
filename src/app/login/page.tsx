@@ -17,7 +17,7 @@ export default async function LoginPage({
     <main className="min-h-dvh flex items-center justify-center p-6">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="mx-auto w-14 h-14 rounded-2xl bg-brand-500 text-white flex items-center justify-center text-2xl font-bold shadow-lg shadow-black/40">
+          <div className="mx-auto w-14 h-14 rounded-2xl bg-brand-500 text-white flex items-center justify-center text-2xl font-bold shadow-lg shadow-brand-500/30">
             {appName[0]?.toUpperCase() ?? 'L'}
           </div>
           <h1 className="mt-4 text-2xl font-bold tracking-tight">{appName}</h1>

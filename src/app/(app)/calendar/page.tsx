@@ -191,7 +191,7 @@ export default async function CalendarPage({
           {Array.from({ length: firstOffset }).map((_, i) => {
             const prevMonthDays = new Date(Date.UTC(y, m - 1, 0)).getUTCDate();
             return (
-              <div key={`e${i}`} className="aspect-square rounded-xl flex items-center justify-center text-[12px] text-white/[0.15]">
+              <div key={`e${i}`} className="aspect-square rounded-xl flex items-center justify-center text-[12px] text-[#c3cbd9]">
                 {prevMonthDays - firstOffset + i + 1}
               </div>
             );
@@ -228,7 +228,7 @@ export default async function CalendarPage({
           })}
           {/* sonraki ayın başı — soluk (son hafta satırı tamamlanır) */}
           {Array.from({ length: (7 - (firstOffset + daysInMonth) % 7) % 7 }).map((_, i) => (
-            <div key={`n${i}`} className="aspect-square rounded-xl flex items-center justify-center text-[12px] text-white/[0.15]">
+            <div key={`n${i}`} className="aspect-square rounded-xl flex items-center justify-center text-[12px] text-[#c3cbd9]">
               {i + 1}
             </div>
           ))}
