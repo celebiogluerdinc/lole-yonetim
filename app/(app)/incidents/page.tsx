@@ -1,0 +1,128 @@
+import { redirect } from 'next/navigation';
+import { getCtx } from '@/lib/auth';
+import { TZ } from '@/lib/utils';
+import { chunkedIn, selectAll } from '@/lib/db';
+import IncidentsClient from '@/components/IncidentsClient';
+
+export const dynamic = 'force-dynamic';
+
+// VERİ POLİTİKASI: olay kayıtları silinmez / gizlenmez — tamamı listelenir
+// (sayfa sayfa okunur, 1000 satır sınırına takılmaz).
+
+export default async function IncidentsPage() {
+  const { supabase, profile, companyId } = await getCtx();
+  if (!companyId) redirect(profile.role === 'super_admin' ? '/super/companies' : '/home');
+
+  const isAdmin = ['super_admin', 'admin'].includes(profile.role);
+
+  // RLS güvencesi: personel yalnızca KENDİ kaydını görür, aksiyon raporlarını göremez.
+  const rows = await selectAll<any>(() => supabase
+    .from('incidents')
+    .select('*, reporter:reporter_id(full_name), approver:approved_by(full_name), departments:department_id(name)')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true }));
+
+  const ids = rows.map((r: any) => r.id);
+  let actions: any[] = [];
+  if (isAdmin && ids.length) {
+    // kayıt sayısı büyüdüğünde tek istekte gönderilemez → parçalı sorgu
+    actions = await chunkedIn<any>(
+      chunk => supabase
+        .from('incident_actions')
+        .select('*, author:author_id(full_name)')
+        .in('incident_id', chunk)
+        .order('created_at', { ascending: true }),
+      ids
+    );
+  }
+
+  const { data: depts } = await supabase
+    .from('departments').select('id, name').eq('company_id', companyId).order('name');
+
+  // ---- FOTOĞRAFLAR ----
+  // Satır kuralı (RLS) zaten kimin görebileceğini belirler: yönetici tümünü,
+  // yükleyen kendi eklediğini. Burada yalnızca görüntüleme bağlantısı üretilir.
+  const photoRows = ids.length
+    ? await chunkedIn<any>(
+        chunk => supabase
+          .from('incident_photos')
+          .select('id, incident_id, storage_path, file_name, uploaded_by, created_at')
+          .in('incident_id', chunk)
+          .order('created_at', { ascending: true }),
+        ids
+      )
+    : [];
+
+  const signedByPath: Record<string, string> = {};
+  if (photoRows.length) {
+    const paths = photoRows.map((p: any) => p.storage_path);
+    for (let i = 0; i < paths.length; i += 100) {
+      const { data: urls } = await supabase.storage
+        .from('attachments')
+        .createSignedUrls(paths.slice(i, i + 100), 3600);
+      (urls ?? []).forEach((u: any, k: number) => {
+        if (u?.signedUrl) signedByPath[paths[i + k]] = u.signedUrl;
+      });
+    }
+  }
+
+  const fmt = (iso: string) => new Date(iso).toLocaleString('tr-TR', {
+    timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+  const dayKey = (iso: string) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date(iso));
+
+  const actionsByInc: Record<string, any[]> = {};
+  for (const a of actions) {
+    (actionsByInc[a.incident_id] ??= []).push({
+      id: a.id,
+      body: a.body,
+      author: a.author?.full_name ?? '—',
+      authorId: a.author_id,
+      date: fmt(a.created_at)
+    });
+  }
+
+  const photosByInc: Record<string, any[]> = {};
+  for (const p of photoRows) {
+    const url = signedByPath[p.storage_path];
+    if (!url) continue;
+    (photosByInc[p.incident_id] ??= []).push({
+      id: p.id,
+      url,
+      name: p.file_name,
+      uploaderId: p.uploaded_by
+    });
+  }
+
+  const incidents = rows.map((r: any) => ({
+    id: r.id,
+    title: r.title,
+    body: r.body,
+    location: r.location,
+    severity: r.severity,
+    status: r.status,
+    occurred: fmt(r.occurred_at),
+    day: dayKey(r.occurred_at),
+    created: fmt(r.created_at),
+    reporter: r.reporter?.full_name ?? '—',
+    reporterId: r.reporter_id,
+    dept: r.departments?.name ?? null,
+    approver: r.approver?.full_name ?? null,
+    decisionNote: r.decision_note,
+    actions: actionsByInc[r.id] ?? [],
+    photos: photosByInc[r.id] ?? []
+  }));
+
+  return (
+    <IncidentsClient
+      incidents={incidents}
+      departments={(depts ?? []) as any}
+      meId={profile.id}
+      isAdmin={isAdmin}
+      isSuper={profile.role === 'super_admin'}
+    />
+  );
+}
