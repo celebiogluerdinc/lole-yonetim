@@ -6,16 +6,18 @@ const config: Config = {
     extend: {
       colors: {
         // iOS system palette (Apple Reminders look)
+        // açık tema paleti (eski "ios-*" adları korunuyor ki
+        // mevcut bileşenler olduğu gibi çalışsın)
         ios: {
-          blue: '#0A84FF',
-          red: '#FF453A',
-          orange: '#FF9F0A',
-          green: '#30D158',
-          indigo: '#5E5CE6',
-          purple: '#BF5AF2',
-          gray: '#8E8E93',
-          bg: '#000000',
-          fill: '#2C2C2E'
+          blue: '#0A6CFF',
+          red: '#E5484D',
+          orange: '#E8930C',
+          green: '#12A150',
+          indigo: '#5B54D6',
+          purple: '#7C5CFC',
+          gray: '#667085',
+          bg: '#F4F6FA',
+          fill: '#EEF1F6'
         },
         // Lole brand (logo & accents)
         brand: {
