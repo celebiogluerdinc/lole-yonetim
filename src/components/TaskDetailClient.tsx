@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Camera, Paperclip, Send, AlertTriangle, ThumbsUp, ThumbsDown, Ban, CheckCheck, LayoutTemplate, Play, Clock3, Repeat } from 'lucide-react';
+import { Check, Camera, Paperclip, Send, AlertTriangle, ThumbsUp, ThumbsDown, Ban, CheckCheck, LayoutTemplate, Play, Clock3, Repeat, AlarmClock } from 'lucide-react';
 import type { Task, ChecklistItem } from '@/lib/types';
 import { fmtDate } from '@/lib/utils';
 import {
@@ -128,7 +128,15 @@ export default function TaskDetailClient({
                 {itemDone(item) && <Check size={14} strokeWidth={3} />}
               </button>
               <div className="flex-1 min-w-0">
-                <p className={`text-sm ${itemDone(item) ? 'line-through text-[#AEAEB2]' : ''}`}>{item.title}</p>
+                <p className={`text-sm ${itemDone(item) ? 'line-through text-[#AEAEB2]' : ''}`}>
+                  {item.title}
+                  {item.remind_at && !itemDone(item) && (
+                    <span title="Bu saatte hatırlatma bildirimi gider"
+                      className="ml-2 inline-flex items-center gap-1 align-middle rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
+                      <AlarmClock size={11} /> {String(item.remind_at).slice(0, 5)}
+                    </span>
+                  )}
+                </p>
                 {item.is_done && item.done_at && (
                   <p className="text-[11px] text-emerald-300">
                     ✓ {(item as any).doneBy?.full_name ? `${(item as any).doneBy.full_name} · ` : ''}

@@ -34,7 +34,8 @@ const META: Record<string, { Icon: LucideIcon; color: string }> = {
   search: { Icon: Search, color: '#64D2FF' },
   folder: { Icon: FolderOpen, color: '#30B0C7' },
   incident: { Icon: ShieldAlert, color: '#FF375F' },
-  meeting: { Icon: Presentation, color: '#BF5AF2' }
+  meeting: { Icon: Presentation, color: '#BF5AF2' },
+  hq: { Icon: Building2, color: '#0A6CFF' }
 };
 
 export type IconName = keyof typeof META;

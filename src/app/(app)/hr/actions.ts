@@ -357,6 +357,7 @@ export async function decideLeave(id: string, approve: boolean, note?: string) {
     `${req.start_date} – ${req.end_date}${note ? ` · ${note}` : ''}`, '/leave');
 
   revalidatePath('/leave');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 

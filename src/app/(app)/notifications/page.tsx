@@ -5,7 +5,7 @@ import NotifAutoRead from '@/components/NotifAutoRead';
 import PushSetup from '@/components/PushSetup';
 import {
   ClipboardList, Clock, AlertCircle, CheckCircle2, ShieldQuestion,
-  OctagonAlert, Undo2, Megaphone, MessageCircle, MessagesSquare, Bell
+  OctagonAlert, Undo2, Megaphone, MessageCircle, MessagesSquare, Bell, AlarmClock
 } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +18,7 @@ const META: Record<string, { Icon: any; color: string; title: (p: any) => string
   task_pending_review:{ Icon: ShieldQuestion, color: '#FF9500', title: p => `Onayınızı bekliyor${p.by ? ` — ${p.by}` : ''}`, sub: p => p.title },
   task_blocked:       { Icon: OctagonAlert, color: '#FF3B30', title: p => `Engel bildirildi${p.by ? ` — ${p.by}` : ''}`, sub: p => p.title },
   task_rejected:      { Icon: Undo2, color: '#FF3B30', title: p => 'Göreviniz reddedildi', sub: p => p.note ?? p.title },
+  checklist_reminder: { Icon: AlarmClock, color: '#FF9500', title: p => `Hatırlatma: ${p.item_title ?? 'checklist maddesi'}`, sub: p => p.title },
   announcement:       { Icon: Megaphone, color: '#FF9500', title: p => 'Yeni duyuru', sub: p => p.title },
   comment:            { Icon: MessagesSquare, color: '#5856D6', title: p => 'Yeni yorum', sub: p => p.title },
   message:            { Icon: MessageCircle, color: '#34C759', title: p => `${p.from ?? 'Yeni mesaj'}`, sub: p => p.preview },

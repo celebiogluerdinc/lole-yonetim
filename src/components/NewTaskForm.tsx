@@ -26,6 +26,8 @@ export default function NewTaskForm({
   const [type, setType] = useState<'task' | 'checklist'>('task');
   const [deptId, setDeptId] = useState(departments[0]?.id ?? '');
   const [items, setItems] = useState<string[]>(['']);
+  /** Maddelerle AYNI sırada tutulan hatırlatma saatleri ('' = hatırlatma yok). */
+  const [itemTimes, setItemTimes] = useState<string[]>(['']);
   const [recur, setRecur] = useState<'none' | 'daily' | 'weekly' | 'monthly' | 'custom'>('none');
   const [draft, setDraft] = useState<any>(null);
   const [draftV, setDraftV] = useState(0);
@@ -46,7 +48,9 @@ export default function NewTaskForm({
   function applyDraft(d: any) {
     setDraft(d);
     setType(d.type === 'checklist' ? 'checklist' : 'task');
-    setItems(Array.isArray(d.items) && d.items.length ? d.items : ['']);
+    const next = Array.isArray(d.items) && d.items.length ? d.items : [''];
+    setItems(next);
+    setItemTimes(next.map(() => ''));   // yapay zeka taslağı saat önermez
     setRecur('none');
     if (d.department_name) {
       const match = departments.find(x => tr(x.name) === tr(d.department_name));
@@ -107,6 +111,10 @@ export default function NewTaskForm({
           {type === 'checklist' && (
             <div>
               <label className="label">Checklist maddeleri *</label>
+              <p className="text-[12px] text-[#8E8E93] -mt-1 mb-2">
+                Saat sütunu isteğe bağlıdır. Saat yazarsanız, görevin gününde o saatte
+                madde hâlâ işaretlenmemişse atanan kişiye hatırlatma bildirimi gider (en geç 10 dakika içinde).
+              </p>
               <div className="space-y-2">
                 {items.map((val, i) => (
                   <div key={i} className="flex gap-2">
@@ -115,13 +123,28 @@ export default function NewTaskForm({
                       onChange={e => setItems(arr => arr.map((v, j) => j === i ? e.target.value : v))}
                       className="input" placeholder={`Madde ${i + 1}`}
                     />
+                    {/* Her maddeye karşılık BİR saat alanı gönderilir; boş kalması serbesttir.
+                        Sıra bozulmasın diye madde silinince saat de aynı sırayla silinir. */}
+                    <input
+                      name="item_times" type="time" value={itemTimes[i] ?? ''}
+                      onChange={e => setItemTimes(arr => {
+                        const n = [...arr]; n[i] = e.target.value; return n;
+                      })}
+                      title="Hatırlatma saati (isteğe bağlı)"
+                      className="input !w-[124px] shrink-0"
+                    />
                     {items.length > 1 && (
-                      <button type="button" onClick={() => setItems(arr => arr.filter((_, j) => j !== i))}
+                      <button type="button"
+                        onClick={() => {
+                          setItems(arr => arr.filter((_, j) => j !== i));
+                          setItemTimes(arr => arr.filter((_, j) => j !== i));
+                        }}
                         className="btn-ghost !px-2 text-[#AEAEB2]"><X size={16} /></button>
                     )}
                   </div>
                 ))}
-                <button type="button" onClick={() => setItems(arr => [...arr, ''])}
+                <button type="button"
+                  onClick={() => { setItems(arr => [...arr, '']); setItemTimes(arr => [...arr, '']); }}
                   className="btn-ghost text-ios-blue text-sm"><Plus size={15} /> Madde ekle</button>
               </div>
             </div>

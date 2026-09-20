@@ -21,7 +21,7 @@ const HIDE_ORDER_LINE = [
 const HIDE_CUSTOMER = [
   ...HIDE_ORDER_LINE,
   '/home', '/search', '/assistant', '/incidents', '/meetings', '/files',
-  '/admin/users', '/admin/settings', '/super/companies'
+  '/admin/users', '/admin/settings', '/super/companies', '/merkez'
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -54,7 +54,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const [
     companyRes, { count: unreadCount }, appNameRes,
     { count: msgUnreadCount }, annRes, annReadRes, { count: reviewCount }, myAssignedRes,
-    incidentRes, meetingRes, orderRes
+    incidentRes, meetingRes, orderRes,
+    hqPurRes, hqPayRes, hqLeaveRes, hqIncRes, hqReviewRes
   ] = await Promise.all([
     companyId
       ? supabase.from('companies').select('name').eq('id', companyId).maybeSingle()
@@ -102,7 +103,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       ? supabase.from('purchase_requests')
           .select('id', { count: 'exact', head: true })
           .eq('company_id', companyId).eq('status', 'pending')
-      : Promise.resolve({ count: 0 } as any)
+      : Promise.resolve({ count: 0 } as any),
+
+    // ---- YÖNETİM MERKEZİ ROZETİ ----
+    // ŞİRKET FİLTRESİ YOK: adminler tüm şirketleri görür (kural gereği).
+    // Beşi de yalnızca sayı döndürür (head: true), satır taşımaz.
+    ...(isAdminRole && !isCustomer ? [
+      supabase.from('purchase_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('payment_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('incidents').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'pending_review')
+    ] : [
+      Promise.resolve({ count: 0 } as any), Promise.resolve({ count: 0 } as any),
+      Promise.resolve({ count: 0 } as any), Promise.resolve({ count: 0 } as any),
+      Promise.resolve({ count: 0 } as any)
+    ])
   ]);
   const appName = appNameRes?.data?.value ?? 'Lole Yönetim';
   let companyName = appName;
@@ -125,9 +141,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const incidentPending = (incidentRes as any)?.count ?? 0;
   const upcomingMeetings = ((meetingRes as any)?.data ?? []).length;
   const orderPending = (orderRes as any)?.count ?? 0;
+  const merkezPending =
+    ((hqPurRes as any)?.count ?? 0) + ((hqPayRes as any)?.count ?? 0) +
+    ((hqLeaveRes as any)?.count ?? 0) + ((hqIncRes as any)?.count ?? 0) +
+    ((hqReviewRes as any)?.count ?? 0);
 
   const nav = ([
     { href: '/home', label: 'Ana Sayfa', icon: 'home', show: true, badge: myToday },
+    // Tüm şirketleri ve sipariş hattını tek ekrandan yöneten merkez —
+    // yalnızca admin ve süper yönetici.
+    { href: '/merkez', label: 'Yönetim Merkezi', icon: 'hq', show: isAdminRole && !isCustomer, badge: merkezPending },
     { href: '/search', label: 'Arama', icon: 'search', show: true, badge: 0 },
     { href: '/messages', label: 'Mesajlar', icon: 'chat', show: true, badge: msgUnread },
     { href: '/assistant', label: 'Lole Asistan', icon: 'sparkles', show: !!process.env.ANTHROPIC_API_KEY, badge: 0 },
@@ -210,7 +233,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#1C1C1E]/85 backdrop-blur-xl border-t border-white/[0.10] flex justify-around py-1.5 z-40 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {nav.slice(0, 4).map(n => (
           <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} mobile
-            short={({ 'Ana Sayfa': 'Anasayfa', 'Lole Asistan': 'Asistan', 'Bildirimler': 'Bildirim', 'Ödeme Talepleri': 'Ödeme', 'Satın Alma': 'Satın Al', 'Sipariş Ver': 'Sipariş', 'Olay Kaydı': 'Olay', 'Toplantılar': 'Toplantı' } as Record<string, string>)[n.label] ?? n.label} />
+            short={({ 'Ana Sayfa': 'Anasayfa', 'Yönetim Merkezi': 'Merkez', 'Lole Asistan': 'Asistan', 'Bildirimler': 'Bildirim', 'Ödeme Talepleri': 'Ödeme', 'Satın Alma': 'Satın Al', 'Sipariş Ver': 'Sipariş', 'Olay Kaydı': 'Olay', 'Toplantılar': 'Toplantı' } as Record<string, string>)[n.label] ?? n.label} />
         ))}
         <MobileMenu
           items={nav.map(({ href, label, icon, badge }) => ({ href, label, icon, badge }))}

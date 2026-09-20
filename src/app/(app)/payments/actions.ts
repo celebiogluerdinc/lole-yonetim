@@ -182,6 +182,7 @@ export async function decidePaymentRequest(id: string, approve: boolean, note?: 
   revalidatePath('/payments');
   revalidatePath('/notifications');
   revalidatePath('/', 'layout');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 
@@ -212,6 +213,7 @@ export async function completePaymentRequest(id: string) {
   revalidatePath('/payments');
   revalidatePath('/notifications');
   revalidatePath('/', 'layout');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 
@@ -226,6 +228,7 @@ export async function cancelPaymentRequest(id: string) {
   if (error) return { error: error.message };
   if (!data?.length) return { error: 'Yalnızca kendi bekleyen talebinizi iptal edebilirsiniz.' };
   revalidatePath('/payments');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 

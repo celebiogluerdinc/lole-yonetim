@@ -239,6 +239,15 @@ export async function decidePurchaseRequest(id: string, approve: boolean, note?:
     return { error: 'Bu kayıt yönettiğiniz departmanların kapsamında değil.' };
   }
 
+  // Yönetim merkezinden BAŞKA bir şirketin kaydı sonuçlandırılabilir; bildirim dili
+  // aktif şirkete göre değil, kaydın kendi şirketine göre seçilir.
+  let kayitOrderLine = isOrderLine;
+  if (req.company_id) {
+    const { data: c } = await supabase.from('companies')
+      .select('kind').eq('id', req.company_id).maybeSingle();
+    kayitOrderLine = (c as any)?.kind === 'order_line';
+  }
+
   const { data: updated, error } = await supabase.from('purchase_requests').update({
     status: approve ? 'approved' : 'rejected',
     decided_by: profile.id,
@@ -248,7 +257,7 @@ export async function decidePurchaseRequest(id: string, approve: boolean, note?:
   if (error) return { error: error.message };
   if (!updated?.length) return { error: 'Bu talep az önce başka biri tarafından sonuçlandırıldı.' };
 
-  const t = say(isOrderLine);
+  const t = say(kayitOrderLine);
   const head = approve ? t.approved : t.rejected;
   await notifyUser(supabase, {
     companyId: req.company_id, userId: req.requester_id,
@@ -258,6 +267,7 @@ export async function decidePurchaseRequest(id: string, approve: boolean, note?:
   revalidatePath('/purchasing');
   revalidatePath('/notifications');
   revalidatePath('/', 'layout');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 
@@ -291,6 +301,7 @@ export async function completePurchaseRequest(id: string) {
   revalidatePath('/purchasing');
   revalidatePath('/notifications');
   revalidatePath('/', 'layout');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 
@@ -305,6 +316,7 @@ export async function cancelPurchaseRequest(id: string) {
   if (error) return { error: error.message };
   if (!data?.length) return { error: 'Yalnızca kendi bekleyen talebinizi iptal edebilirsiniz.' };
   revalidatePath('/purchasing');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 

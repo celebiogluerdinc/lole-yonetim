@@ -23,6 +23,8 @@ const TaskSchema = z.object({
   requires_approval: z.boolean(),
   assignees: z.array(z.string().uuid()).min(1),
   items: z.array(z.string().min(1)).optional().default([]),
+  /** items ile AYNI sırada hatırlatma saatleri; '' = hatırlatma yok */
+  item_times: z.array(z.string().regex(/^$|^([01]\d|2[0-3]):[0-5]\d$/)).optional().default([]),
   recur: z.enum(['none', 'daily', 'weekly', 'monthly', 'custom']),
   weekdays: z.array(z.string()).optional().default([]),
   monthday: z.coerce.number().min(1).max(31).optional(),
@@ -82,7 +84,19 @@ export async function createTask(formData: FormData): Promise<{ error?: string }
     requires_photo: formData.get('requires_photo') === 'on',
     requires_approval: formData.get('requires_approval') === 'on',
     assignees: formData.getAll('assignees').map(String),
-    items: formData.getAll('items').map(String).filter(s => s.trim().length > 0),
+    // Madde ve saati AYNI sırada gelir. Boş maddeler atılırken saatin de
+    // aynı anda atılması şart — yoksa saatler bir alt maddeye kayar.
+    ...(() => {
+      const rawItems = formData.getAll('items').map(String);
+      const rawTimes = formData.getAll('item_times').map(String);
+      const pairs = rawItems
+        .map((title, i) => ({ title, time: rawTimes[i] ?? '' }))
+        .filter(p => p.title.trim().length > 0);
+      return {
+        items: pairs.map(p => p.title.trim()),
+        item_times: pairs.map(p => p.time)
+      };
+    })(),
     recur: String(formData.get('recur') ?? 'none'),
     weekdays: formData.getAll('weekdays').map(String),
     monthday: formData.get('monthday') || undefined,
@@ -166,7 +180,11 @@ export async function createTask(formData: FormData): Promise<{ error?: string }
     input.assignees.map(uid => ({ task_id: t.id, user_id: uid })));
   const itemRows = input.items.length
     ? tasks.flatMap((t: any) =>
-        input.items.map((title, i) => ({ task_id: t.id, title, position: i })))
+        input.items.map((title, i) => ({
+          task_id: t.id, title, position: i,
+          // boş saat = hatırlatma yok
+          remind_at: input.item_times[i]?.trim() ? input.item_times[i] : null
+        })))
     : [];
   const notifRows = tasks.flatMap((t: any) =>
     input.assignees.map(uid => ({

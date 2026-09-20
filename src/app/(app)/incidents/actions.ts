@@ -111,6 +111,7 @@ export async function decideIncident(id: string, approve: boolean, note?: string
   revalidatePath('/incidents');
   revalidatePath('/notifications');
   revalidatePath('/', 'layout');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 
@@ -126,6 +127,7 @@ export async function closeIncident(id: string) {
   if (!data?.length) return { error: 'Yalnızca onaylanmış kayıtlar kapatılabilir.' };
 
   revalidatePath('/incidents');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 

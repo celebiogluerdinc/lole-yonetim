@@ -72,6 +72,9 @@ export interface ChecklistItem {
   done_at: string | null;
   requires_photo: boolean;
   note: string | null;
+  /** Gün içi hatırlatma saati ('14:00'). Boşsa hatırlatma yapılmaz. */
+  remind_at?: string | null;
+  reminded_on?: string | null;
 }
 
 export interface Announcement {

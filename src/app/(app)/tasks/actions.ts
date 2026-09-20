@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
 import { pushToUsers } from '@/lib/push';
+import { chunkedIn } from '@/lib/db';
 
 const PUSH_TITLES: Record<string, string> = {
   task_completed: '✅ Görev tamamlandı',
@@ -228,6 +229,7 @@ export async function managerSetTaskStatus(taskId: string, status: 'completed' |
   revalidatePath('/manage/tasks');
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath('/home');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 
@@ -309,6 +311,7 @@ export async function reviewTask(taskId: string, approve: boolean, note?: string
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath('/manage/tasks');
   revalidatePath('/home');
+  revalidatePath('/merkez');
   return { ok: true };
 }
 
@@ -420,6 +423,7 @@ export async function updateTask(formData: FormData) {
     requires_approval: z.boolean(),
     assignees: z.array(z.string().uuid()).min(1),
     new_items: z.array(z.string().min(1).max(300)).default([]),
+    new_item_times: z.array(z.string().regex(/^$|^([01]\d|2[0-3]):[0-5]\d$/)).default([]),
     apply_series: z.boolean()
   });
   const parsed = schema.safeParse({
@@ -431,7 +435,14 @@ export async function updateTask(formData: FormData) {
     requires_photo: formData.get('requires_photo') === 'on',
     requires_approval: formData.get('requires_approval') === 'on',
     assignees: formData.getAll('assignees').map(String),
-    new_items: formData.getAll('new_items').map(String).map(s => s.trim()).filter(Boolean),
+    // Başlık ve saat aynı sırada gelir; boş başlık atılırken saati de atılır.
+    ...(() => {
+      const t = formData.getAll('new_items').map(String);
+      const h = formData.getAll('new_item_times').map(String);
+      const pairs = t.map((title, i) => ({ title: title.trim(), time: h[i] ?? '' }))
+        .filter(p => p.title.length > 0);
+      return { new_items: pairs.map(p => p.title), new_item_times: pairs.map(p => p.time) };
+    })(),
     apply_series: formData.get('apply_series') === 'on'
   });
   if (!parsed.success) {
@@ -490,8 +501,30 @@ export async function updateTask(formData: FormData) {
       .order('position', { ascending: false }).limit(1).maybeSingle();
     const base = (lastItem?.position ?? -1) + 1;
     ops.push(supabase.from('checklist_items').insert(
-      i.new_items.map((title, idx) => ({ task_id: i.task_id, title, position: base + idx }))
+      i.new_items.map((title, idx) => ({
+        task_id: i.task_id, title, position: base + idx,
+        remind_at: i.new_item_times[idx]?.trim() ? i.new_item_times[idx] : null
+      }))
     ));
+  }
+
+  // VAR OLAN maddelerin saatleri: item_time_<id> alanları.
+  // Saat boşaltılırsa hatırlatma kalkar; değiştirilirse o gün tekrar hatırlatılabilsin
+  // diye reminded_on sıfırlanır.
+  {
+    const { data: mevcut } = await supabase.from('checklist_items')
+      .select('id, remind_at').eq('task_id', i.task_id);
+    for (const row of mevcut ?? []) {
+      const raw = formData.get(`item_time_${row.id}`);
+      if (raw === null) continue;                       // form bu maddeyi göndermemiş
+      const val = String(raw).trim();
+      if (val && !/^([01]\d|2[0-3]):[0-5]\d$/.test(val)) continue;
+      const yeni = val || null;
+      const eski = row.remind_at ? String(row.remind_at).slice(0, 5) : null;
+      if (yeni === eski) continue;                      // değişmemiş
+      ops.push(supabase.from('checklist_items')
+        .update({ remind_at: yeni, reminded_on: null }).eq('id', row.id));
+    }
   }
   ops.push(log(supabase, task.company_id, profile.id, 'task', i.task_id, 'updated',
     { title: i.title, added: added.length, removed: removed.length, new_items: i.new_items.length }));
@@ -537,6 +570,30 @@ export async function updateTask(formData: FormData) {
         sibIds.flatMap((tid: string) => i.assignees.map(uid => ({ task_id: tid, user_id: uid })))
       );
       if (e3) return { error: `Seri atamaları eklenemedi: ${e3.message} — atamaları görevden tekrar kaydedin.` };
+
+      // HATIRLATMA SAATLERİ de seriye işlenir. Eşleştirme madde BAŞLIĞINA göre
+      // yapılır: her tekrar aynı maddeleri aynı adla taşır. Başlığı değişmiş
+      // ya da elle eklenmiş maddeler olduğu gibi bırakılır.
+      const { data: buGorevinMaddeleri } = await supabase.from('checklist_items')
+        .select('title, remind_at').eq('task_id', i.task_id);
+      const saatByBaslik = new Map<string, string | null>();
+      for (const m of buGorevinMaddeleri ?? []) saatByBaslik.set(m.title, m.remind_at ?? null);
+
+      if (saatByBaslik.size) {
+        const kardesMaddeler = await chunkedIn<any>(
+          chunk => supabase.from('checklist_items')
+            .select('id, task_id, title, remind_at').in('task_id', chunk),
+          sibIds);
+        for (const m of kardesMaddeler) {
+          if (!saatByBaslik.has(m.title)) continue;
+          const yeni = saatByBaslik.get(m.title) ?? null;
+          const eski = m.remind_at ?? null;
+          if (String(yeni ?? '') === String(eski ?? '')) continue;
+          await supabase.from('checklist_items')
+            .update({ remind_at: yeni, reminded_on: null }).eq('id', m.id);
+        }
+      }
+
       seriesUpdated = sibIds.length;
     }
   }

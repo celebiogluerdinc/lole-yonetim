@@ -7,7 +7,7 @@ import { updateTask, deleteChecklistItem } from '@/app/(app)/tasks/actions';
 import { useConfirm } from '@/components/ConfirmProvider';
 
 interface Person { id: string; full_name: string; }
-interface Item { id: string; title: string; is_done: boolean; }
+interface Item { id: string; title: string; is_done: boolean; remind_at?: string | null; }
 
 /** Manager-only "Düzenle" panel on the task detail page:
  *  date/time, title, priority, assignees, and checklist items (add/remove). */
@@ -28,15 +28,17 @@ export default function TaskEdit({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
-  const [newItems, setNewItems] = useState<string[]>([]);
+  const [newItems, setNewItems] = useState<{ title: string; time: string }[]>([]);
   const [newItemText, setNewItemText] = useState('');
+  const [newItemTime, setNewItemTime] = useState('');
   const [removedItems, setRemovedItems] = useState<Set<string>>(new Set());
 
   function addNewItem() {
     const t = newItemText.trim();
     if (!t) return;
-    setNewItems(a => [...a, t]);
+    setNewItems(a => [...a, { title: t, time: newItemTime }]);
     setNewItemText('');
+    setNewItemTime('');
   }
 
   async function removeExistingItem(it: Item) {
@@ -66,7 +68,10 @@ export default function TaskEdit({
       action={(fd) => start(async () => {
         setError(null); setOk(false);
         fd.set('task_id', task.id);
-        for (const t of newItems) fd.append('new_items', t);
+        for (const it of newItems) {
+          fd.append('new_items', it.title);
+          fd.append('new_item_times', it.time);
+        }
         const r = await updateTask(fd);
         if (r?.error) setError(r.error);
         else {
@@ -143,20 +148,31 @@ export default function TaskEdit({
       {task.type === 'checklist' && (
         <div className="space-y-2">
           <label className="label">Checklist maddeleri</label>
+          <p className="text-[11px] text-[#8E8E93] -mt-1">
+            Saat alanı isteğe bağlı. Yazarsanız görev gününde o saatte hatırlatma bildirimi gider.
+          </p>
           {items.filter(it => !removedItems.has(it.id)).map(it => (
             <div key={it.id} className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2">
               <span className={`flex-1 text-sm truncate ${it.is_done ? 'line-through text-[#8E8E93]' : ''}`}>
                 {it.title}
               </span>
+              {/* maddenin kendi saati — boşaltılırsa hatırlatma kalkar */}
+              <input type="time" name={`item_time_${it.id}`}
+                defaultValue={it.remind_at ? String(it.remind_at).slice(0, 5) : ''}
+                title="Hatırlatma saati (isteğe bağlı)"
+                className="input !w-[112px] !py-1.5 !text-[14px] shrink-0" />
               <button type="button" onClick={() => removeExistingItem(it)} title="Maddeyi sil"
                 className="w-7 h-7 rounded-full bg-rose-500/15 text-rose-300 flex items-center justify-center hover:bg-rose-500/30 shrink-0">
                 <Trash2 size={12} />
               </button>
             </div>
           ))}
-          {newItems.map((t, i) => (
+          {newItems.map((it, i) => (
             <div key={`n${i}`} className="flex items-center gap-2 rounded-xl bg-ios-blue/10 border border-ios-blue/25 px-3 py-2">
-              <span className="flex-1 text-sm truncate">{t} <em className="text-[11px] text-ios-blue">(yeni)</em></span>
+              <span className="flex-1 text-sm truncate">
+                {it.title} <em className="text-[11px] text-ios-blue">(yeni)</em>
+                {it.time && <em className="text-[11px] text-amber-300 not-italic"> · ⏰ {it.time}</em>}
+              </span>
               <button type="button" onClick={() => setNewItems(a => a.filter((_, x) => x !== i))}
                 className="w-7 h-7 rounded-full bg-white/10 text-[#8E8E93] flex items-center justify-center shrink-0">
                 <X size={12} />
@@ -171,6 +187,9 @@ export default function TaskEdit({
               placeholder="Yeni madde yazın…"
               className="input"
             />
+            <input type="time" value={newItemTime} onChange={e => setNewItemTime(e.target.value)}
+              title="Hatırlatma saati (isteğe bağlı)"
+              className="input !w-[112px] shrink-0" />
             <button type="button" onClick={addNewItem} className="btn-outline shrink-0">
               <Plus size={14} /> Ekle
             </button>

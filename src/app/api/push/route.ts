@@ -6,7 +6,8 @@ export const dynamic = 'force-dynamic';
 
 const TITLES: Record<string, string> = {
   due_soon: '⏰ Görevin süresi yaklaşıyor',
-  overdue: '🚨 Görev gecikti'
+  overdue: '🚨 Görev gecikti',
+  checklist_reminder: '⏰ Checklist hatırlatması'
 };
 
 /**
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
     .from('notifications')
     .select('id, user_id, type, payload')
     .eq('pushed', false)
-    .in('type', ['due_soon', 'overdue'])
+    .in('type', ['due_soon', 'overdue', 'checklist_reminder'])
     .gte('created_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString())
     .limit(200);
 
@@ -34,8 +35,12 @@ export async function GET(req: NextRequest) {
   for (const n of pending) {
     const p = n.payload ?? {};
     const escalated = p.escalated === true || p.escalated === 'true';
+    // checklist hatırlatmasında maddenin kendisi başlıkta, görev adı altta durur
+    const isItem = n.type === 'checklist_reminder';
     await pushToUsers([n.user_id], {
-      title: escalated ? '🚨 Ekipte geciken görev var' : (TITLES[n.type] ?? 'Lole Yönetim'),
+      title: escalated
+        ? '🚨 Ekipte geciken görev var'
+        : (isItem && p.item_title ? `⏰ ${p.item_title}` : (TITLES[n.type] ?? 'Lole Yönetim')),
       body: p.title ?? '',
       url: p.task_id ? `/tasks/${p.task_id}` : '/notifications'
     });
