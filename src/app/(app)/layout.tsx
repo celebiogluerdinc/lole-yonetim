@@ -14,7 +14,8 @@ export const dynamic = 'force-dynamic';
 /** SİPARİŞ HATTI'nda kimseye gösterilmeyen sekmeler (personel dâhil). */
 const HIDE_ORDER_LINE = [
   '/manage/tasks', '/manage/templates', '/manage', '/tasks', '/shifts', '/clock', '/leave',
-  '/payments', '/admin/departments', '/admin/qr', '/performance', '/calendar'
+  '/payments', '/admin/departments', '/admin/qr', '/performance', '/calendar',
+  '/sales'
 ];
 
 /** MÜŞTERİ hesabına ek olarak kapalı sekmeler. */
@@ -55,7 +56,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     companyRes, { count: unreadCount }, appNameRes,
     { count: msgUnreadCount }, annRes, annReadRes, { count: reviewCount }, myAssignedRes,
     incidentRes, meetingRes, orderRes,
-    hqPurRes, hqPayRes, hqLeaveRes, hqIncRes, hqReviewRes
+    hqPurRes, hqPayRes, hqLeaveRes, hqIncRes, hqReviewRes,
+    salesFupRes
   ] = await Promise.all([
     companyId
       ? supabase.from('companies').select('name').eq('id', companyId).maybeSingle()
@@ -118,13 +120,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       Promise.resolve({ count: 0 } as any), Promise.resolve({ count: 0 } as any),
       Promise.resolve({ count: 0 } as any), Promise.resolve({ count: 0 } as any),
       Promise.resolve({ count: 0 } as any)
-    ])
+    ]),
+    // saha satış: bana ait açık ve vadesi gelmiş takipler (menü rozeti)
+    isCustomer
+      ? Promise.resolve({ count: 0 } as any)
+      : supabase.from('follow_ups')
+          .select('id', { count: 'exact', head: true })
+          .eq('owner_user_id', profile.id).eq('status', 'acik')
+          .lte('due_date', new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' }))
   ]);
   const appName = appNameRes?.data?.value ?? 'Lole Yönetim';
   let companyName = appName;
   if (companyRes?.data) companyName = companyRes.data.name;
   else if (profile.role === 'super_admin') companyName = 'Tüm Şirketler';
   const unread = unreadCount ?? 0;
+  const salesFollowUps = (salesFupRes as any)?.count ?? 0;
   const msgUnread = msgUnreadCount ?? 0;
 
   const readSet = new Set((annReadRes?.data ?? []).map((r: any) => r.announcement_id));
@@ -158,6 +168,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/calendar', label: 'Takvim', icon: 'calendar', show: true, badge: 0 },
     { href: '/announcements', label: 'Duyurular', icon: 'megaphone', show: true, badge: annUnread },
     { href: '/performance', label: 'Performans', icon: 'chart', show: true, badge: 0 },
+    // ---- SAHA SATIŞ (F01–F11) ----
+    { href: '/sales', label: 'Saha Satış', icon: 'sales', show: true, badge: salesFollowUps },
+    { href: '/sales/routes', label: 'Rota', icon: 'calendar', show: true, badge: 0 },
+    { href: '/sales/outlets', label: 'Noktalar', icon: 'outlet', show: true, badge: 0 },
+    { href: '/sales/visits', label: 'Ziyaretler', icon: 'visit', show: isManagerRole, badge: 0 },
+    { href: '/sales/orders', label: 'Teklif & Sipariş', icon: 'receipt', show: isManagerRole, badge: 0 },
+    { href: '/sales/reports', label: 'Saha Raporları', icon: 'report', show: isManagerRole, badge: 0 },
     // sipariş hattında bu sekme "Sipariş Ver" adıyla görünür (aynı modül)
     { href: '/purchasing', label: isOrderLine ? 'Sipariş Ver' : 'Satın Alma', icon: 'cart', show: true, badge: isOrderLine ? orderPending : 0 },
     { href: '/payments', label: 'Ödeme Talepleri', icon: 'wallet', show: true, badge: 0 },

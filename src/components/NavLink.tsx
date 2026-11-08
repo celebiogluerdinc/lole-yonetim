@@ -7,6 +7,7 @@ import {
   Users, Building2, Landmark, MessageCircle, Bell, BarChart3, Sparkles,
   CalendarClock, Plane, Clock, ClipboardList, Settings, UserCircle2,
   ShoppingCart, Wallet, Search, FolderOpen, ShieldAlert, Presentation,
+  Route, Store, ClipboardCheck, Receipt,
   type LucideIcon
 } from 'lucide-react';
 
@@ -35,7 +36,12 @@ const META: Record<string, { Icon: LucideIcon; color: string }> = {
   folder: { Icon: FolderOpen, color: '#30B0C7' },
   incident: { Icon: ShieldAlert, color: '#FF375F' },
   meeting: { Icon: Presentation, color: '#BF5AF2' },
-  hq: { Icon: Building2, color: '#0A6CFF' }
+  hq: { Icon: Building2, color: '#0A6CFF' },
+  sales: { Icon: Route, color: '#FF9F0A' },
+  outlet: { Icon: Store, color: '#30D158' },
+  visit: { Icon: ClipboardCheck, color: '#5E5CE6' },
+  receipt: { Icon: Receipt, color: '#FF9F0A' },
+  report: { Icon: BarChart3, color: '#30B0C7' }
 };
 
 export type IconName = keyof typeof META;
