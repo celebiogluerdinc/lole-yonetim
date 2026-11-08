@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PackageCheck, ClipboardCheck, Truck, CheckCircle2, X } from 'lucide-react';
 import {
   confirmOrderStock, acceptOrder, setOrderStatus, linkOrderToVisit, addCommerceFollowUp
 } from '@/app/(app)/sales/orders/actions';
+import { SalesStep, NextStepCard } from '@/components/sales/OrdersClient';
 
 interface PersonLite { id: string; full_name: string }
 interface VisitLite { id: string; visit_date: string; outcome: string }
@@ -13,9 +15,13 @@ interface VisitLite { id: string; visit_date: string; outcome: string }
 /**
  * SİPARİŞ İŞLEMLERİ (F06)
  *
- * İki teyit — stok/sevk ve sipariş kabulü — ayrı ayrı. Stok teyidi
- * verilmeden "Onayla" açılmıyor; veritabanı da reddediyor, arayüz
- * bunu önceden gösteriyor.
+ * Teklif detayıyla aynı düzen: en tepede "Sıradaki adım" kartı — her
+ * durumda TEK birincil buton ve kilitliyse NEDENİ — ardından onay/kontrol
+ * ve en sonda takip.
+ *
+ * İki teyit ayrı ayrı: stok/sevk ve sipariş kabulü. Stok teyidi
+ * verilmeden "Onayla" açılmıyor; veritabanı da reddediyor, arayüz bunu
+ * önceden söylüyor.
  */
 export default function OrderDetailActions({
   order, people, linkableVisits
@@ -42,20 +48,122 @@ export default function OrderDetailActions({
   function run(fn: () => Promise<any>) {
     setErr(null);
     start(async () => {
-      const r = await fn();
-      if (r?.error) { setErr(r.error); return; }
-      setCancelOpen(false); setFupOpen(false);
-      router.refresh();
+      try {
+        const r = await fn();
+        if (r?.error) { setErr(r.error); return; }
+        setCancelOpen(false); setFupOpen(false);
+        router.refresh();
+      } catch {
+        setErr('İşlem tamamlanamadı. Sayfayı yenileyip tekrar deneyin.');
+      }
     });
   }
+
+  const nextStep = (() => {
+    if (order.status === 'iptal') {
+      return {
+        title: 'Sipariş iptal edildi',
+        hint: 'İptal edilmiş siparişte yapılacak işlem yok.',
+        blocked: null as string | null,
+        button: null as React.ReactNode
+      };
+    }
+    if (order.status === 'teslim') {
+      return {
+        title: 'Teslim edildi — zincir kapandı',
+        hint: 'Teslimden 48–72 saat sonra memnuniyet takibi yapılması kuraldır. Takip kaydını aşağıdan ekleyin.',
+        blocked: null,
+        button: null
+      };
+    }
+    if (!order.stock_confirmed_at) {
+      return {
+        title: 'Stok ve sevk teyidi ver',
+        hint: 'Teyit verilmeden sipariş onaylanamaz; depo tarafı bu teyitle sevke başlar.',
+        blocked: null,
+        button: (
+          <button disabled={pending} onClick={() => run(() => confirmOrderStock(order.id))}
+            className="btn-primary">
+            <PackageCheck size={16} /> Teyit ver
+          </button>
+        )
+      };
+    }
+    if (['taslak', 'onay_bekliyor'].includes(order.status)) {
+      return {
+        title: 'Siparişi onayla',
+        hint: 'Stok teyidi tamam. Onaydan sonra sevk adımına geçilir.',
+        blocked: null,
+        button: (
+          <button disabled={pending} onClick={() => run(() => setOrderStatus(order.id, 'onayli'))}
+            className="btn-primary">
+            <CheckCircle2 size={16} /> Siparişi onayla
+          </button>
+        )
+      };
+    }
+    if (order.status === 'onayli') {
+      return {
+        title: 'Sevk edildi olarak işaretle',
+        hint: 'Ürün yola çıktığında işaretleyin; teslim teyidi bir sonraki adım.',
+        blocked: null,
+        button: (
+          <button disabled={pending} onClick={() => run(() => setOrderStatus(order.id, 'sevk_edildi'))}
+            className="btn-primary">
+            <Truck size={16} /> Sevk edildi
+          </button>
+        )
+      };
+    }
+    return {
+      title: 'Teslim teyidi al',
+      hint: 'Teslim alan kişiyle teyitleyip işaretleyin; zincir burada kapanır.',
+      blocked: null,
+      button: (
+        <button disabled={pending} onClick={() => run(() => setOrderStatus(order.id, 'teslim'))}
+          className="btn-primary">
+          <CheckCircle2 size={16} /> Teslim edildi
+        </button>
+      )
+    };
+  })();
 
   return (
     <div className="space-y-5">
       {err && <p className="alert-error">{err}</p>}
 
-      <section className="card p-5 space-y-3">
-        <p className="section-title">Teyitler</p>
+      <NextStepCard title={nextStep.title} hint={nextStep.hint} blocked={nextStep.blocked}>
+        {nextStep.button}
+        {open && (
+          <button disabled={pending} onClick={() => setCancelOpen(v => !v)} className="btn-ghost">
+            <X size={15} /> İptal
+          </button>
+        )}
+      </NextStepCard>
 
+      {cancelOpen && (
+        <section className="card p-5 space-y-2">
+          <p className="section-title">İptal sebebi</p>
+          <input value={cancelText} onChange={e => setCancelText(e.target.value)}
+            className="input" placeholder="İptal sebebi (zorunlu)" />
+          <div className="flex gap-2">
+            <button disabled={pending || !cancelText.trim()}
+              onClick={() => run(() => setOrderStatus(order.id, 'iptal', cancelText))}
+              className="btn-danger disabled:opacity-40">İptali kaydet</button>
+            <button onClick={() => setCancelOpen(false)} className="btn-ghost">Vazgeç</button>
+          </div>
+        </section>
+      )}
+
+      {order.cancel_reason && (
+        <p className="text-[13px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2">
+          İptal sebebi: {order.cancel_reason}
+        </p>
+      )}
+
+      {/* ---------- ONAY & KONTROL ---------- */}
+      <section className="card p-5 space-y-3">
+        <p className="section-title">Onay ve kontrol</p>
         <Confirm
           title="Stok ve Sevk Teyidi" at={order.stock_confirmed_at} by={order.stock_confirmed_by_name}
           disabled={pending || !open} icon={<PackageCheck size={14} />}
@@ -66,49 +174,9 @@ export default function OrderDetailActions({
           disabled={pending || !open} icon={<ClipboardCheck size={14} />}
           onClick={() => run(() => acceptOrder(order.id))}
         />
-
-        {open && (
-          <div className="flex flex-wrap gap-2 pt-1">
-            {['taslak', 'onay_bekliyor'].includes(order.status) && (
-              <button disabled={!order.stock_confirmed_at || pending}
-                onClick={() => run(() => setOrderStatus(order.id, 'onayli'))}
-                className="btn-primary disabled:opacity-40"
-                title={order.stock_confirmed_at ? '' : 'Önce stok ve sevk teyidi gerekli'}>
-                <CheckCircle2 size={16} /> Siparişi onayla
-              </button>
-            )}
-            {order.status === 'onayli' && (
-              <button disabled={pending} onClick={() => run(() => setOrderStatus(order.id, 'sevk_edildi'))}
-                className="btn-outline">
-                <Truck size={15} /> Sevk edildi
-              </button>
-            )}
-            {order.status === 'sevk_edildi' && (
-              <button disabled={pending} onClick={() => run(() => setOrderStatus(order.id, 'teslim'))}
-                className="btn-primary">
-                <CheckCircle2 size={16} /> Teslim edildi
-              </button>
-            )}
-            <button disabled={pending} onClick={() => setCancelOpen(v => !v)} className="btn-ghost">
-              <X size={15} /> İptal
-            </button>
-          </div>
-        )}
-
-        {cancelOpen && (
-          <div className="rounded-xl bg-white/[0.03] p-3 space-y-2">
-            <input value={cancelText} onChange={e => setCancelText(e.target.value)}
-              className="input" placeholder="İptal sebebi (zorunlu)" />
-            <button disabled={pending} onClick={() => run(() => setOrderStatus(order.id, 'iptal', cancelText))}
-              className="btn-danger">İptali kaydet</button>
-          </div>
-        )}
-
-        {order.cancel_reason && (
-          <p className="text-[13px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2">
-            İptal sebebi: {order.cancel_reason}
-          </p>
-        )}
+        <p className="text-[12px] text-[#8E8E93]">
+          Şu an tüm departmanlar teyit verebiliyor.
+        </p>
       </section>
 
       {/* Ziyarete bağla — ziyaret "sipariş" sonucuyla kapanacaksa bu bağ şart */}
@@ -134,10 +202,16 @@ export default function OrderDetailActions({
         </section>
       )}
 
+      {/* ---------- 5 · SONUÇ & TAKİP ---------- */}
       <section className="card p-5 space-y-3">
-        <p className="section-title">Sonraki adım ve kontrol</p>
+        <SalesStep n={5} title="Sonuç & Takip" sub="Tek sorumlu ve son tarih" />
         {!fupOpen ? (
-          <button onClick={() => setFupOpen(true)} className="btn-ghost text-sm">Takip ekle</button>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setFupOpen(true)} className="btn-ghost text-sm">Takip ekle</button>
+            <Link href={`/sales/orders/quotes/new?outlet=${order.outlet_id}`} className="btn-ghost text-sm">
+              Aynı noktaya yeni teklif
+            </Link>
+          </div>
         ) : (
           <form action={(fd) => run(() => addCommerceFollowUp(fd))} className="space-y-3">
             <input type="hidden" name="source_type" value="order" />

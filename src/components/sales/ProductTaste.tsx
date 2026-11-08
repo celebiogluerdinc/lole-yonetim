@@ -96,7 +96,7 @@ export default function ProductTaste({
   const maxUsage = Math.max(1, ...usageByProduct.map(u => u.total));
 
   return (
-    <main className="max-w-4xl mx-auto p-4 md:p-8 space-y-5">
+    <main className="py-5 space-y-5">
       <header className="px-1">
         <h1 className="text-[28px] leading-tight font-bold tracking-tight">Ürünler & Tadım</h1>
         <p className="text-[14px] text-[#8E8E93]">

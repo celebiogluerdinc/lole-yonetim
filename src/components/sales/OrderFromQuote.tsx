@@ -1,10 +1,11 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Package } from 'lucide-react';
 import { createOrderFromQuote } from '@/app/(app)/sales/orders/actions';
-import { tl } from '@/components/sales/OrdersClient';
+import { SalesStep } from '@/components/sales/OrdersClient';
+import { tl, BOTTLES_PER_CASE } from '@/lib/commerce-format';
 
 interface QuoteLine { product_id: string; product_name: string; bottles: number; unit_price: number }
 interface BatchLite { id: string; product_id: string; batch_no: string; expiry_date: string | null }
@@ -13,13 +14,17 @@ interface PersonLite { id: string; full_name: string }
 /**
  * SİPARİŞ VE TESLİMAT TALİMATI (F06)
  *
- * Teklifin kalemleriyle ön dolu gelir. F06'nın kritik kuralı burada
- * yapısal olarak uygulanıyor: GERÇEK miktar ücretli ŞİŞE adedidir,
- * koli yalnızca gösterim (1 koli = 12 şişe) ve ikisi TOPLANMAZ.
- * Bedelsiz şişe ayrı sütunda durur, tutara girmez.
+ * Teklif formuyla AYNI SIRA ve AYNI BİRİM: 2 Ne (koli) → 3 Kaça →
+ * 4 Koşullar (ödeme/teslimat) → 5 Sonuç & Takip. Teklif ekranında koli
+ * girip sipariş ekranında şişe girmek, sahada en sık yapılan hatanın
+ * kaynağıydı — ikisi artık koli.
+ *
+ * F06'nın kritik kuralı yapısal olarak duruyor: gerçek miktar ÜCRETLİ
+ * adettir, bedelsiz ayrı sütunda ve tutara girmez; koli ile şişe aynı
+ * miktarın iki gösterimidir, TOPLANMAZ.
  */
 export default function OrderFromQuote({
-  quoteId, outletName, lines, batches, people, defaults
+  quoteId, outletName, lines, batches, people, defaults, openInitially
 }: {
   quoteId: string;
   outletName: string;
@@ -30,41 +35,71 @@ export default function OrderFromQuote({
     delivery_address: string | null; receiver_phone: string | null;
     payment_method: string | null; delivery_date: string | null;
   };
+  openInitially?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!openInitially);
   const [err, setErr] = useState<string | null>(null);
+  const errRef = useRef<HTMLDivElement | null>(null);
 
-  const [rows, setRows] = useState<Record<string, { paid: string; free: string; price: string }>>(
+  useEffect(() => { if (openInitially) setOpen(true); }, [openInitially]);
+
+  // Teklif şişe tutar, form koli gösterir — ön dolum burada çevriliyor.
+  const [rows, setRows] = useState<Record<string, { paidCases: string; freeCases: string; price: string }>>(
     () => Object.fromEntries(lines.map(l => [
-      l.product_id, { paid: String(l.bottles), free: '0', price: String(l.unit_price) }
+      l.product_id,
+      {
+        paidCases: String(Math.round(l.bottles / BOTTLES_PER_CASE)),
+        freeCases: '0',
+        price: String(l.unit_price)
+      }
     ]))
   );
 
   const total = useMemo(() => lines.reduce((sum, l) => {
     const r = rows[l.product_id];
     if (!r) return sum;
-    const paid = Number(r.paid) || 0, price = Number(r.price) || 0;
-    return sum + paid * price;
+    const paidCases = Number(r.paidCases) || 0, price = Number(r.price) || 0;
+    return sum + paidCases * BOTTLES_PER_CASE * price;
   }, 0), [rows, lines]);
 
-  const freeTotal = useMemo(
-    () => lines.reduce((s, l) => s + (Number(rows[l.product_id]?.free) || 0), 0),
+  const freeCasesTotal = useMemo(
+    () => lines.reduce((s, l) => s + (Number(rows[l.product_id]?.freeCases) || 0), 0),
     [rows, lines]
   );
 
-  function setRow(pid: string, f: 'paid' | 'free' | 'price', v: string) {
-    setRows(s => ({ ...s, [pid]: { ...(s[pid] ?? { paid: '0', free: '0', price: '0' }), [f]: v } }));
+  const lineCount = useMemo(
+    () => lines.filter(l => (Number(rows[l.product_id]?.paidCases) || 0)
+      + (Number(rows[l.product_id]?.freeCases) || 0) > 0).length,
+    [rows, lines]
+  );
+
+  const blocker = lineCount === 0 ? 'En az bir ürüne koli adedi girin.' : null;
+
+  function setRow(pid: string, f: 'paidCases' | 'freeCases' | 'price', v: string) {
+    setRows(s => ({
+      ...s,
+      [pid]: { ...(s[pid] ?? { paidCases: '0', freeCases: '0', price: '0' }), [f]: v }
+    }));
   }
 
   function onSubmit(fd: FormData) {
     setErr(null);
     start(async () => {
-      const r = await createOrderFromQuote(fd);
-      if (r?.error) { setErr(r.error); return; }
-      if ((r as any)?.id) router.push(`/sales/orders/${(r as any).id}`);
-      router.refresh();
+      try {
+        const r = await createOrderFromQuote(fd);
+        if (r?.error) {
+          setErr(r.error);
+          errRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+        if ((r as any)?.id) router.push(`/sales/orders/${(r as any).id}`);
+        router.refresh();
+      } catch {
+        setErr('Sipariş oluşturulamadı. Girdiğiniz bilgiler ekranda duruyor; tekrar deneyin.');
+        errRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     });
   }
 
@@ -77,48 +112,58 @@ export default function OrderFromQuote({
   }
 
   return (
-    <form action={onSubmit} className="space-y-4">
+    <form action={onSubmit} className="space-y-5">
       <input type="hidden" name="quote_id" value={quoteId} />
-      {err && <p className="alert-error">{err}</p>}
 
       <p className="text-[13px] text-[#8E8E93]">{outletName} · teklif kalemleriyle ön dolu</p>
 
-      <div className="space-y-2">
+      {/* ---------- 2 · NE ---------- */}
+      <div className="space-y-3">
+        <SalesStep n={2} title="Ne" sub="Kaç koli ücretli, kaç koli bedelsiz" />
+        <p className="text-[12px] text-[#8E8E93]">
+          Miktar KOLİ olarak girilir; 1 koli = 12 × 250 ml şişe.
+          Bedelsiz koli tutara girmez — ücretli ile toplanmaz.
+        </p>
         {lines.map(l => {
-          const r = rows[l.product_id] ?? { paid: '0', free: '0', price: '0' };
-          const paid = Number(r.paid) || 0;
+          const r = rows[l.product_id] ?? { paidCases: '0', freeCases: '0', price: '0' };
+          const paidCases = Number(r.paidCases) || 0;
+          const freeCases = Number(r.freeCases) || 0;
+          const price = Number(r.price) || 0;
           const pBatches = batches.filter(b => b.product_id === l.product_id);
           return (
             <div key={l.product_id} className="rounded-xl bg-white/[0.03] p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[15px] font-medium">{l.product_name}</p>
                 <span className="text-[13px] text-[#AEAEB2] tabular-nums">
-                  {tl(paid * (Number(r.price) || 0))}
+                  {tl(paidCases * BOTTLES_PER_CASE * price)}
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="label !text-[12px]">Ücretli şişe</label>
-                  <input type="number" min={0} name={`oi_${l.product_id}_paid`} value={r.paid}
-                    onChange={e => setRow(l.product_id, 'paid', e.target.value)}
+                  <label className="label !text-[12px]">Ücretli koli</label>
+                  <input type="number" min={0} inputMode="numeric"
+                    name={`oi_${l.product_id}_paid_cases`} value={r.paidCases}
+                    onChange={e => setRow(l.product_id, 'paidCases', e.target.value)}
                     className="input !py-2 !text-[13px]" />
                 </div>
                 <div>
-                  <label className="label !text-[12px]">Bedelsiz şişe</label>
-                  <input type="number" min={0} name={`oi_${l.product_id}_free`} value={r.free}
-                    onChange={e => setRow(l.product_id, 'free', e.target.value)}
+                  <label className="label !text-[12px]">Bedelsiz koli</label>
+                  <input type="number" min={0} inputMode="numeric"
+                    name={`oi_${l.product_id}_free_cases`} value={r.freeCases}
+                    onChange={e => setRow(l.product_id, 'freeCases', e.target.value)}
                     className="input !py-2 !text-[13px]" />
                 </div>
                 <div>
-                  <label className="label !text-[12px]">Birim TL</label>
-                  <input type="number" min={0} step="0.01" name={`oi_${l.product_id}_price`} value={r.price}
+                  <label className="label !text-[12px]">Birim TL / şişe</label>
+                  <input type="number" min={0} step="0.01" inputMode="decimal"
+                    name={`oi_${l.product_id}_price`} value={r.price}
                     onChange={e => setRow(l.product_id, 'price', e.target.value)}
                     className="input !py-2 !text-[13px]" />
                 </div>
               </div>
               {pBatches.length > 0 && (
                 <div>
-                  <label className="label !text-[12px]">Parti</label>
+                  <label className="label !text-[12px]">Parti (depo kaydı · istege bağlı)</label>
                   <select name={`oi_${l.product_id}_batch`} className="input !py-2 !text-[13px]" defaultValue="">
                     <option value="">Seçilmedi</option>
                     {pBatches.map(b => (
@@ -129,40 +174,47 @@ export default function OrderFromQuote({
                   </select>
                 </div>
               )}
-              <p className="text-[12px] text-[#8E8E93]">
-                {paid} ücretli şişe = {(paid / 12).toFixed(2)} koli · koli ve şişe aynı miktarın gösterimidir, toplanmaz
-              </p>
+              {(paidCases > 0 || freeCases > 0) && (
+                <p className="text-[12px] text-[#8E8E93]">
+                  {paidCases} ücretli koli = {paidCases * BOTTLES_PER_CASE} şişe
+                  {freeCases > 0 ? ` · ${freeCases} bedelsiz koli (${freeCases * BOTTLES_PER_CASE} şişe)` : ''}
+                </p>
+              )}
             </div>
           );
         })}
       </div>
 
-      <div className="rounded-xl bg-white/[0.05] px-4 py-3 flex items-center justify-between">
-        <span className="text-[13px] text-[#8E8E93]">
-          Ücretli toplam{freeTotal > 0 ? ` · ${freeTotal} bedelsiz şişe (tutara girmez)` : ''}
-        </span>
-        <span className="text-xl font-bold tabular-nums">{tl(total)}</span>
+      {/* ---------- 3 · KAÇA ---------- */}
+      <div className="space-y-3">
+        <SalesStep n={3} title="Kaça" sub="Ücretli toplam ve tahsilat" />
+        <div className="rounded-xl bg-white/[0.05] px-4 py-3 flex items-center justify-between gap-3">
+          <span className="text-[13px] text-[#8E8E93]">
+            Ücretli toplam{freeCasesTotal > 0 ? ` · ${freeCasesTotal} bedelsiz koli (tutara girmez)` : ''}
+          </span>
+          <span className="text-xl font-bold tabular-nums">{tl(total)}</span>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Ödeme şekli</label>
+            <input name="payment_method" className="input" defaultValue={defaults?.payment_method ?? ''} />
+          </div>
+          <div>
+            <label className="label">Tahsilat referansı</label>
+            <input name="collection_ref" className="input" />
+          </div>
+        </div>
       </div>
 
-      <div className="grid sm:grid-cols-2 gap-3">
+      {/* ---------- 4 · KOŞULLAR ---------- */}
+      <div className="space-y-3">
+        <SalesStep n={4} title="Koşullar" sub="Müşteri onayı ve teslimat" />
         <div>
           <label className="label">Müşteri onay tarihi</label>
           <input type="date" name="customer_approval_date" className="input" />
         </div>
         <div>
-          <label className="label">Ödeme şekli</label>
-          <input name="payment_method" className="input" defaultValue={defaults?.payment_method ?? ''} />
-        </div>
-      </div>
-      <div>
-        <label className="label">Tahsilat referansı</label>
-        <input name="collection_ref" className="input" />
-      </div>
-
-      <div className="rounded-xl bg-white/[0.03] p-3 space-y-3">
-        <p className="text-[14px] font-medium">Teslimat</p>
-        <div>
-          <label className="label">Adres</label>
+          <label className="label">Teslimat adresi</label>
           <input name="delivery_address" className="input" defaultValue={defaults?.delivery_address ?? ''} />
         </div>
         <div className="grid sm:grid-cols-3 gap-3">
@@ -185,9 +237,9 @@ export default function OrderFromQuote({
         </div>
       </div>
 
-      {/* F06'nın zincir bağları: eğitim randevusu ve ilk takip */}
-      <div className="rounded-xl bg-white/[0.03] p-3 space-y-3">
-        <p className="text-[14px] font-medium">Sonraki halkalar</p>
+      {/* ---------- 5 · SONUÇ & TAKİP ---------- */}
+      <div className="space-y-3">
+        <SalesStep n={5} title="Sonuç & Takip" sub="Eğitim randevusu ve ilk takip" />
         <div className="grid sm:grid-cols-3 gap-3">
           <div>
             <label className="label">Eğitim randevusu</label>
@@ -206,17 +258,22 @@ export default function OrderFromQuote({
             </select>
           </div>
         </div>
+        <p className="text-[13px] text-[#8E8E93]">
+          Sipariş <strong>taslak</strong> olarak açılır. Stok ve sevk teyidi verilmeden onaylanamaz —
+          teyit sipariş kartından verilir.
+        </p>
       </div>
 
-      <div className="flex gap-2">
-        <button type="submit" disabled={pending} className="btn-primary">
-          {pending ? 'Oluşturuluyor…' : 'Siparişi oluştur'}
-        </button>
-        <button type="button" onClick={() => setOpen(false)} className="btn-ghost">Vazgeç</button>
+      <div ref={errRef} className="space-y-2">
+        {err && <p className="alert-error">{err}</p>}
+        <div className="flex gap-2 items-center flex-wrap">
+          <button type="submit" disabled={!!blocker || pending} className="btn-primary disabled:opacity-40">
+            {pending ? 'Oluşturuluyor…' : 'Siparişi oluştur'}
+          </button>
+          <button type="button" onClick={() => setOpen(false)} className="btn-ghost">Vazgeç</button>
+          {blocker && !pending && <span className="text-[12px] text-amber-300">{blocker}</span>}
+        </div>
       </div>
-      <p className="text-[12px] text-[#8E8E93]">
-        Sipariş taslak olarak açılır. Stok ve sevk teyidi verilmeden onaylanamaz.
-      </p>
     </form>
   );
 }

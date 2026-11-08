@@ -4,11 +4,13 @@ import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Plus, Check, Clock, X, CalendarDays, Trash2, Lock, Unlock, MapPin, AlertTriangle
+  Plus, Check, Clock, X, CalendarDays, Trash2, Lock, Unlock, MapPin,
+  AlertTriangle, Sparkles, Layers
 } from 'lucide-react';
 import {
   createRoutePlan, addRouteStop, setRouteStopStatus, deleteRouteStop,
-  closeRouteDay, reopenRouteDay
+  closeRouteDay, reopenRouteDay, seedDayRoute, groupStopsByDistrict,
+  addOutletsToDay
 } from '@/app/(app)/sales/routes/actions';
 
 interface Plan {
@@ -95,6 +97,16 @@ export default function RoutePlanner({
       .slice(0, 5);
   }, [outlets, stops]);
 
+  // İlçe dağılımı: en kalabalık ilçe önde.
+  const districtStrip = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of stops) {
+      const k = s.outlets?.district || 'İlçe yok';
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
+  }, [stops]);
+
   const filteredOutlets = useMemo(() => {
     const t = tr(q);
     return outlets
@@ -115,7 +127,7 @@ export default function RoutePlanner({
   // ---------- plan yoksa: kurulum ----------
   if (!plan) {
     return (
-      <main className="max-w-3xl mx-auto p-4 md:p-8 space-y-5">
+      <main className="py-5 space-y-5">
         <Header date={date} today={today} />
         {err && <p className="alert-error">{err}</p>}
 
@@ -152,6 +164,21 @@ export default function RoutePlanner({
             {pending ? 'Kuruluyor…' : 'Rotayı kur'}
           </button>
         </form>
+
+        {/* Boş sayfadan başlamak zaman kaybı: sistem günü önerebiliyor. */}
+        <section className="card p-5 space-y-3">
+          <p className="section-title flex items-center gap-2">
+            <Sparkles size={15} /> Günü sistem önersin
+          </p>
+          <p className="text-[13px] text-[#8E8E93]">
+            Geciken takiplerin noktaları, sonra uzun süre uğranmamış A ve B segment
+            noktalar — hedef sayısı kadar durak kurulur. Sonra siz düzenlersiniz.
+          </p>
+          <button onClick={() => run(() => seedDayRoute(date))} disabled={pending}
+            className="btn-outline">
+            <Sparkles size={15} /> {pending ? 'Hazırlanıyor…' : 'Bu günü bana öner'}
+          </button>
+        </section>
       </main>
     );
   }
@@ -162,7 +189,7 @@ export default function RoutePlanner({
   const pct = plan.target_visits > 0 ? Math.min(100, Math.round((done / plan.target_visits) * 100)) : 0;
 
   return (
-    <main className="max-w-3xl mx-auto p-4 md:p-8 space-y-5">
+    <main className="py-5 space-y-5">
       <Header date={date} today={today} />
       {err && <p className="alert-error">{err}</p>}
 
@@ -206,17 +233,42 @@ export default function RoutePlanner({
 
       {/* duraklar */}
       <section className="card divide-y divide-white/[0.08] overflow-hidden">
-        <div className="px-5 pt-5 pb-3 flex items-center justify-between">
+        <div className="px-5 pt-5 pb-3 flex items-center justify-between gap-3 flex-wrap">
           <p className="section-title !mb-0">Duraklar</p>
           {!closed && (
-            <button onClick={() => setAdding(v => !v)} className="btn-ghost text-sm">
-              <Plus size={15} /> Durak ekle
-            </button>
+            <div className="flex gap-1.5">
+              {stops.length > 1 && (
+                <button onClick={() => run(() => groupStopsByDistrict(plan.id))}
+                  disabled={pending} className="btn-ghost text-sm">
+                  <Layers size={15} /> İlçeye göre sırala
+                </button>
+              )}
+              <button onClick={() => setAdding(v => !v)} className="btn-ghost text-sm">
+                <Plus size={15} /> Durak ekle
+              </button>
+            </div>
           )}
         </div>
 
+        {/* Hangi ilçede kaç durak var — şehirde gidip gelmeyi görünür kılıyor. */}
+        {districtStrip.length > 1 && (
+          <div className="px-5 pb-3 flex flex-wrap gap-1.5">
+            {districtStrip.map(([d, n]) => (
+              <span key={d} className="badge bg-white/[0.07] text-[#D1D1D6] flex items-center gap-1">
+                <MapPin size={10} />{d} · {n}
+              </span>
+            ))}
+          </div>
+        )}
+
         {stops.length === 0 && (
-          <p className="px-5 pb-5 text-[14px] text-[#8E8E93]">Henüz durak eklenmedi.</p>
+          <div className="px-5 pb-5 space-y-3">
+            <p className="text-[14px] text-[#8E8E93]">Henüz durak eklenmedi.</p>
+            <button onClick={() => run(() => seedDayRoute(date))} disabled={pending}
+              className="btn-outline !py-2 !text-[13px]">
+              <Sparkles size={14} /> Günü bana öner
+            </button>
+          </div>
         )}
 
         {stops.map(s => {
@@ -230,7 +282,7 @@ export default function RoutePlanner({
                 <div className="flex-1 min-w-0">
                   <p className="text-[15px] font-medium truncate">{name}</p>
                   <p className="text-[13px] text-[#8E8E93] truncate">
-                    {[s.purpose, s.contact_person].filter(Boolean).join(' · ') || '—'}
+                    {[s.outlets?.district, s.purpose, s.contact_person].filter(Boolean).join(' · ') || '—'}
                   </p>
                   {s.result_note && (
                     <p className="text-[12px] text-amber-300 mt-0.5">{s.result_note}</p>
@@ -353,6 +405,13 @@ export default function RoutePlanner({
           <p className="text-[13px] text-[#8E8E93]">
             A ve B segmentinde, 14 günden uzun süredir ziyaret edilmemiş noktalar.
           </p>
+          {suggestions.length > 1 && (
+            <button
+              onClick={() => run(() => addOutletsToDay(suggestions.map(s => s.o.id), date))}
+              disabled={pending} className="btn-ghost !py-1.5 !text-[13px]">
+              <Plus size={14} /> {suggestions.length} noktayı birden ekle
+            </button>
+          )}
           {suggestions.map(({ o, d }) => (
             <form key={o.id} action={(fd) => run(() => addRouteStop(fd))}
               className="flex items-center gap-2 text-sm">

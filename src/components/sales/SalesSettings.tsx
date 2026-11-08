@@ -65,7 +65,7 @@ export default function SalesSettings({
   }, {});
 
   return (
-    <main className="max-w-3xl mx-auto p-4 md:p-8 space-y-5">
+    <main className="py-5 space-y-5">
       <header className="px-1">
         <h1 className="text-[28px] leading-tight font-bold tracking-tight">Saha Satış Ayarları</h1>
         <p className="text-[14px] text-[#8E8E93]">Yalnızca yönetici değiştirebilir.</p>

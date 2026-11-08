@@ -22,7 +22,7 @@ export default async function VisitDetail({ params }: { params: { id: string } }
         .select('score, evidence, score_criteria:criterion_id(label, grp)')
         .eq('visit_id', visit.id),
       supabase.from('visit_tastings')
-        .select('*, products:product_id(name, taste_reference), product_batches:batch_id(batch_no, expiry_date)')
+        .select('*, products:product_id(name, taste_reference)')
         .eq('visit_id', visit.id),
       supabase.from('visit_tasting_summary')
         .select('*, products:preferred_product_id(name)').eq('visit_id', visit.id).maybeSingle(),
@@ -36,7 +36,7 @@ export default async function VisitDetail({ params }: { params: { id: string } }
     id ? (reasons ?? []).find((r: any) => r.id === id)?.label ?? '—' : null;
 
   return (
-    <main className="max-w-3xl mx-auto p-4 md:p-8 space-y-5">
+    <main className="py-5 space-y-5">
       <header className="card p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -118,8 +118,7 @@ export default async function VisitDetail({ params }: { params: { id: string } }
                 </div>
               </div>
               <p className="text-[12px] text-[#8E8E93]">
-                {t.product_batches?.batch_no ? `Parti ${t.product_batches.batch_no}` : 'Parti kaydedilmedi'}
-                {' · '}{t.bottles_opened} açılan, {t.bottles_left_sealed} kapalı
+                {t.bottles_opened} açılan, {t.bottles_left_sealed} kapalı
               </p>
               {t.customer_verbatim && (
                 <p className="text-sm italic text-[#D1D1D6] border-l-2 border-white/20 pl-3">

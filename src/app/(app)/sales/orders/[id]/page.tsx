@@ -3,9 +3,10 @@ import Link from 'next/link';
 import { getCtx } from '@/lib/auth';
 import { fmtDate } from '@/lib/utils';
 import OrderDetailActions from '@/components/sales/OrderDetailActions';
+import { SalesStep } from '@/components/sales/OrdersClient';
 import {
-  ORDER_STATUS_LABEL, ORDER_STATUS_COLOR, tl, type OrderStatus
-} from '@/components/sales/OrdersClient';
+  ORDER_STATUS_LABEL, ORDER_STATUS_COLOR, tl, casesOf, type OrderStatus
+} from '@/lib/commerce-format';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,7 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
   const freeTotal = (items ?? []).reduce((s: number, i: any) => s + (i.free_bottles ?? 0), 0);
 
   return (
-    <main className="max-w-3xl mx-auto p-4 md:p-8 space-y-5">
+    <main className="py-5 space-y-5">
       <header className="card p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -74,24 +75,36 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
           <Field label="Teslimat tarihi" value={order.delivery_date ? fmtDate(order.delivery_date) : null} />
         </div>
 
-        {order.quotes && (
-          <Link href={`/sales/orders/quotes/${order.quotes.id}`}
-            className="mt-3 inline-block text-[13px] text-ios-blue hover:underline">
-            Kaynak teklif{order.quotes.quote_no ? ` #${order.quotes.quote_no}` : ''} →
+        {/* ZİNCİR: ziyaret → teklif → sipariş. Belgeler arasında menüye
+            dönmek gerekmiyor; her halka tek tıkla açılıyor. */}
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+          {order.visit_id && (
+            <Link href={`/sales/visits/${order.visit_id}`} className="text-ios-blue hover:underline">
+              ← Bağlı ziyaret
+            </Link>
+          )}
+          {order.quotes && (
+            <Link href={`/sales/orders/quotes/${order.quotes.id}`} className="text-ios-blue hover:underline">
+              ← Kaynak teklif{order.quotes.quote_no ? ` #${order.quotes.quote_no}` : ''}
+            </Link>
+          )}
+          <Link href={`/sales/orders?outlet=${order.outlet_id}&tab=orders`}
+            className="text-ios-blue hover:underline">
+            Bu noktanın tüm belgeleri
           </Link>
-        )}
+        </div>
       </header>
 
       <section className="card p-5 space-y-3">
-        <p className="section-title">Kalemler</p>
+        <SalesStep n={2} title="Ne" sub="Siparişin kalemleri" />
         {(items ?? []).length === 0 && <p className="text-[14px] text-[#8E8E93]">Kalem yok.</p>}
         {(items ?? []).map((i: any) => (
           <div key={i.product_id} className="flex items-center justify-between gap-3 text-sm border-b border-white/[0.06] pb-2 last:border-0">
             <div className="min-w-0">
               <p className="font-medium truncate">{i.products?.name ?? 'Ürün'}</p>
               <p className="text-[12px] text-[#8E8E93]">
-                {i.paid_bottles} ücretli şişe ({Number(i.paid_cases).toFixed(2)} koli) × {tl(Number(i.unit_price))}
-                {i.free_bottles > 0 ? ` · ${i.free_bottles} bedelsiz` : ''}
+                {casesOf(i.paid_bottles)} ücretli koli ({i.paid_bottles} şişe) × {tl(Number(i.unit_price))}
+                {i.free_bottles > 0 ? ` · ${casesOf(i.free_bottles)} bedelsiz koli` : ''}
                 {i.product_batches?.batch_no ? ` · parti ${i.product_batches.batch_no}` : ''}
               </p>
             </div>
@@ -100,7 +113,7 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
         ))}
         <div className="flex items-center justify-between pt-2">
           <span className="text-[13px] text-[#8E8E93]">
-            Toplam{freeTotal > 0 ? ` · ${freeTotal} bedelsiz şişe (tutara girmez)` : ''}
+            Toplam{freeTotal > 0 ? ` · ${casesOf(freeTotal)} bedelsiz koli (tutara girmez)` : ''}
             {order.vat_included ? ' · KDV dahil' : ' · KDV hariç'}
           </span>
           <span className="text-xl font-bold tabular-nums">{tl(Number(order.total_amount))}</span>
@@ -108,7 +121,7 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
       </section>
 
       <section className="card p-5 space-y-2 text-sm">
-        <p className="section-title">Teslimat</p>
+        <SalesStep n={4} title="Koşullar" sub="Teslimat bilgisi" />
         <Field label="Adres" value={order.delivery_address} />
         <Field label="Teslim alan" value={order.receiver_name} />
         <Field label="Telefon" value={order.receiver_phone} />

@@ -10,7 +10,6 @@ import {
 
 interface OutletLite { id: string; name: string; city: string | null; district: string | null; status: string }
 interface ProductLite { id: string; name: string; taste_reference: string | null }
-interface BatchLite { id: string; product_id: string; batch_no: string; expiry_date: string | null }
 interface CriterionLite { id: string; label: string; grp: string; applies_to: string }
 interface ReasonLite { id: string; label: string; requires_note: boolean }
 interface PersonLite { id: string; full_name: string }
@@ -25,12 +24,23 @@ interface OrderLite { id: string; order_no: number | null; total_amount: number 
  */
 const STEPS = ['Nokta & Kişi', 'İhtiyaç & Çözüm', 'Tadım', 'Puanlama', 'Sonuç'] as const;
 
+/**
+ * Her adımın tek satır amacı. Sahada "burada benden ne isteniyor" sorusu
+ * en çok zaman kaybettiren şey; başlık yetmiyor, niyet yazılı duruyor.
+ */
+const STEP_INTENT = [
+  'Hangi noktada, kiminle görüştünüz — karar verici miydi?',
+  'Noktanın asıl ihtiyacı ne, siz ne önerdiniz, ne itiraz geldi?',
+  'Hangi ürünler tadıldı, müşteri ne dedi?',
+  'Noktayı aynı ölçekle puanlayın: 1 kötü, 5 çok iyi.',
+  'Ziyaret neyle kapandı ve sıradaki adım kimde?'
+] as const;
+
 export default function VisitForm({
-  outlets, products, batches, criteria, reasons, people, preselectedOutlet, today, orders = []
+  outlets, products, criteria, reasons, people, preselectedOutlet, today, orders = []
 }: {
   outlets: OutletLite[];
   products: ProductLite[];
-  batches: BatchLite[];
   criteria: CriterionLite[];
   reasons: ReasonLite[];
   people: PersonLite[];
@@ -49,8 +59,15 @@ export default function VisitForm({
   const [tasted, setTasted] = useState<string[]>([]);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [objStated, setObjStated] = useState('');
+  const [orderId, setOrderId] = useState('');
+  // Görülen adımlar: yeşil/sarı göstergesi yalnızca kullanıcının uğradığı
+  // adımlar için anlamlı — hiç açılmamış adımı eksik diye boyamak yanıltıyor.
+  const [seen, setSeen] = useState<number[]>([0]);
+  const [stepWarn, setStepWarn] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const topRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLInputElement>(null);
+  const errRef = useRef<HTMLDivElement>(null);
 
   const outlet = outlets.find(o => o.id === outletId);
   const outletOrders = useMemo(
@@ -78,14 +95,82 @@ export default function VisitForm({
     return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
   }, [scores, activeCriteria]);
 
-  const canNext = step !== 0 || !!outletId;
+  /**
+   * Adım engelleri. null = o adım gönderime hazır.
+   * Zorunluluk yalnızca veritabanının gerçekten dayattığı yerde var;
+   * sahada doldurulamayan alanı zorunlu yapmak formu taslakta bırakıyor.
+   */
+  const issues = useMemo<(string | null)[]>(() => [
+    outletId ? null : 'Nokta seçmeden ilerleyemezsiniz.',
+    null,
+    null,
+    null,
+    outcome === 'siparis' && !orderId
+      ? 'Sonuç "sipariş" ise bağlanacak sipariş kaydını seçin.'
+      : outcome === 'olumsuz' && !objStated
+        ? 'Olumsuz sonuç için 2. adımda beyan edilen itirazı seçin.'
+        : null
+  ], [outletId, outcome, orderId, objStated]);
+
+  /** Doldurulmuş sayılma ölçütü — göstergeyi yeşile çevirir. */
+  const filled = useMemo<boolean[]>(() => [
+    !!outletId,
+    true,
+    true,
+    activeCriteria.length === 0 || activeCriteria.some(c => typeof scores[c.id] === 'number'),
+    !!outcome
+  ], [outletId, activeCriteria, scores, outcome]);
+
+  const blocking = issues.find(Boolean) ?? null;
+
+  function go(next: number) {
+    setSeen(s => (s.includes(step) ? s : [...s, step]));
+    if (next > step && issues[step]) { setStepWarn(issues[step]); return; }
+    setStepWarn(null);
+    setStep(next);
+    // Uzun adımdan kısa adıma geçişte ekran ortada kalıyordu.
+    queueMicrotask(() => topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+
+  /**
+   * Kayıttan sonra nereye gidilecek.
+   *
+   * Ziyaret teklif ya da siparişe dönüyorsa iş akışı burada kesilmesin:
+   * temsilciyi listeye değil sıradaki ekrana götürüyoruz. Diğer sonuçlarda
+   * nokta kartına dönüyoruz — "Sıradaki adım" kartı zaten orada.
+   */
+  function nextRoute(visitId?: string): string {
+    if (outcome === 'teklif_istendi') {
+      const qs = new URLSearchParams({ outlet: outletId });
+      if (visitId) qs.set('visit', visitId);
+      return `/sales/orders/quotes/new?${qs.toString()}`;
+    }
+    if (outcome === 'siparis') return `/sales/orders?outlet=${outletId}&tab=orders`;
+    return `/sales/outlets/${outletId}`;
+  }
 
   function submit(fd: FormData) {
     setErr(null);
+    const isDraft = fd.get('submit') !== '1';
     start(async () => {
-      const r = await saveVisit(fd);
-      if (r?.error) { setErr(r.error); return; }
-      router.push('/sales/visits');
+      let r: { ok?: boolean; error?: string; id?: string } | undefined;
+      try {
+        r = await saveVisit(fd);
+      } catch (e: any) {
+        // Sunucu action'ı beklenmedik şekilde çökerse sayfa donmuş gibi
+        // görünüyordu. Yakalayıp gösteriyoruz.
+        setErr(`Beklenmeyen hata: ${e?.message ?? 'bilinmiyor'}`);
+        queueMicrotask(() => errRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+        return;
+      }
+      if (r?.error) {
+        setErr(r.error);
+        // Hata formun en üstünde kalıyordu; kullanıcı en altta olduğu için
+        // "hiçbir şey olmadı" sanıyordu. Hatayı görünür yere kaydırıyoruz.
+        queueMicrotask(() => errRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+        return;
+      }
+      router.push(isDraft ? '/sales/visits' : nextRoute(r?.id));
       router.refresh();
     });
   }
@@ -101,29 +186,44 @@ export default function VisitForm({
     <form
       ref={formRef}
       action={submit}
-      className="max-w-3xl mx-auto p-4 md:p-8 space-y-5"
+      className="py-5 space-y-5"
     >
       <input ref={draftRef} type="hidden" name="submit" defaultValue="1" />
+      <div ref={topRef} />
       <header className="px-1">
         <h1 className="text-[28px] leading-tight font-bold tracking-tight">Yeni Ziyaret</h1>
         <p className="text-[14px] text-[#8E8E93]">{outlet ? outlet.name : 'Nokta seçin'}</p>
       </header>
 
-      {/* adım göstergesi */}
+      {/* Adım göstergesi: uğranmış adım tamamsa yeşil, eksiği varsa sarı. */}
       <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-1">
-        {STEPS.map((s, idx) => (
-          <button key={s} type="button" onClick={() => idx === 0 || outletId ? setStep(idx) : null}
-            className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
-              idx === step ? 'bg-ios-blue text-white'
-              : idx < step ? 'bg-emerald-500/20 text-emerald-300'
-              : 'bg-[#1C1C1E] text-[#8E8E93]'
-            }`}>
-            {idx + 1}. {s}
-          </button>
-        ))}
+        {STEPS.map((s, idx) => {
+          const visited = seen.includes(idx) || idx < step;
+          const tone = idx === step ? 'bg-ios-blue text-white'
+            : !visited ? 'bg-[#1C1C1E] text-[#8E8E93]'
+            : issues[idx] ? 'bg-amber-500/20 text-amber-300'
+            : filled[idx] ? 'bg-emerald-500/20 text-emerald-300'
+            : 'bg-white/[0.07] text-[#AEAEB2]';
+          return (
+            <button key={s} type="button" onClick={() => (idx === 0 || outletId) && go(idx)}
+              className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${tone}`}>
+              {idx + 1}. {s}
+              {visited && idx !== step && !issues[idx] && filled[idx] && (
+                <Check size={12} className="inline ml-1 -mt-0.5" />
+              )}
+            </button>
+          );
+        })}
       </div>
 
+      <p className="px-1 text-[13px] text-[#AEAEB2]">{STEP_INTENT[step]}</p>
+
       {err && <p className="alert-error">{err}</p>}
+      {stepWarn && (
+        <p className="text-[13px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
+          {stepWarn}
+        </p>
+      )}
 
       <input type="hidden" name="outlet_id" value={outletId} />
       <input type="hidden" name="outcome" value={outcome} />
@@ -243,7 +343,6 @@ export default function VisitForm({
 
         {products.map(p => {
           const on = tasted.includes(p.id);
-          const pBatches = batches.filter(b => b.product_id === p.id);
           return (
             <div key={p.id} className="rounded-xl bg-white/[0.03] p-3 space-y-3">
               <label className="flex items-start gap-2.5 cursor-pointer">
@@ -260,18 +359,9 @@ export default function VisitForm({
 
               {on && (
                 <div className="space-y-3 pl-7">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <div>
-                      <label className="label !text-[12px]">Parti</label>
-                      <select name={`batch_${p.id}`} className="input !py-2 !text-[13px]" defaultValue="">
-                        <option value="">Seçilmedi</option>
-                        {pBatches.map(b => (
-                          <option key={b.id} value={b.id}>
-                            {b.batch_no}{b.expiry_date ? ` · ${b.expiry_date}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                  {/* Parti no kaldırıldı: sahada parti takibi yapılmıyor,
+                      numune tüketimini toplam adet üzerinden izliyoruz. */}
+                  <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="label !text-[12px]">Açılan şişe</label>
                       <input type="number" min={0} name={`opened_${p.id}`} defaultValue={0}
@@ -400,7 +490,8 @@ export default function VisitForm({
               {outletOrders.length > 0 ? (
                 <>
                   <label className="label">Bağlanacak sipariş *</label>
-                  <select name="sales_order_id" className="input" defaultValue="">
+                  <select name="sales_order_id" className="input" value={orderId}
+                    onChange={e => setOrderId(e.target.value)}>
                     <option value="">Seçiniz…</option>
                     {outletOrders.map(o => (
                       <option key={o.id} value={o.id}>
@@ -413,10 +504,16 @@ export default function VisitForm({
                   </p>
                 </>
               ) : (
-                <p className="text-[12px] text-amber-300">
-                  Bu nokta için henüz sipariş kaydı yok. Önce Teklif &amp; Sipariş bölümünden
-                  siparişi oluşturun, sonra bu ziyarete bağlayın. Şimdilik taslak kaydedebilirsiniz.
-                </p>
+                <div className="text-[12px] text-amber-300 space-y-1">
+                  <p>
+                    Bu nokta için henüz sipariş kaydı yok. "Taslak kaydet" deyin, siparişi
+                    oluşturun, sonra ziyareti listeden açıp bağlayın — ziyaret kaybolmaz.
+                  </p>
+                  <p>
+                    Sipariş yerine teklif verilecekse sonucu <strong>teklif istendi</strong>
+                    {' '}seçin: gönderince teklif formu bu nokta seçili olarak açılır.
+                  </p>
+                </div>
               )}
             </div>
           )}
@@ -455,30 +552,52 @@ export default function VisitForm({
         </div>
       </section>
 
-      {/* gezinme */}
-      <div className="flex items-center justify-between gap-2">
-        <button type="button" disabled={step === 0} onClick={() => setStep(s => s - 1)}
-          className="btn-ghost disabled:opacity-30">
-          <ChevronLeft size={16} /> Geri
-        </button>
+      {/* Hata, işlem yapılan yerin yanında gösterilir */}
+      <div ref={errRef}>
+        {err && <p className="alert-error">{err}</p>}
+      </div>
 
-        <div className="flex gap-2">
-          <button type="button" onClick={saveDraft} disabled={!outletId || pending}
-            className="btn-outline">
-            Taslak kaydet
+      {/* gezinme */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <button type="button" disabled={step === 0} onClick={() => go(step - 1)}
+            className="btn-ghost disabled:opacity-30">
+            <ChevronLeft size={16} /> Geri
           </button>
-          {step < STEPS.length - 1 ? (
-            <button type="button" disabled={!canNext} onClick={() => setStep(s => s + 1)}
-              className="btn-primary disabled:opacity-40">
-              İleri <ChevronRight size={16} />
+
+          <div className="flex gap-2">
+            <button type="button" onClick={saveDraft} disabled={!outletId || pending}
+              className="btn-outline">
+              Taslak kaydet
             </button>
-          ) : (
-            <button type="submit" disabled={!outletId || pending} className="btn-primary"
-              onClick={() => { if (draftRef.current) draftRef.current.value = '1'; }}>
-              {pending ? 'Kaydediliyor…' : 'Ziyareti gönder'}
-            </button>
-          )}
+            {step < STEPS.length - 1 ? (
+              <button type="button" onClick={() => go(step + 1)}
+                className="btn-primary disabled:opacity-40" disabled={pending}>
+                İleri <ChevronRight size={16} />
+              </button>
+            ) : (
+              <button type="submit" disabled={!!blocking || pending} className="btn-primary disabled:opacity-40"
+                onClick={() => { if (draftRef.current) draftRef.current.value = '1'; }}>
+                {pending ? 'Kaydediliyor…' : 'Ziyareti gönder'}
+              </button>
+            )}
+          </div>
         </div>
+        {/* Gönderemiyorsa nedeni butonun yanında yazılı: "tepki vermedi"
+            şikâyetinin kaynağı sessizce pasif kalan buton. */}
+        {step === STEPS.length - 1 && blocking && !pending && (
+          <p className="text-[12px] text-amber-300 text-right">{blocking}</p>
+        )}
+        {/* Akış nerede devam ediyor — gönderen kişi baştan bilsin. */}
+        {step === STEPS.length - 1 && !blocking && (
+          <p className="text-[12px] text-[#8E8E93] text-right">
+            Gönderince {outcome === 'teklif_istendi'
+              ? 'teklif formu bu nokta seçili olarak açılır.'
+              : outcome === 'siparis'
+                ? 'noktanın sipariş listesi açılır.'
+                : 'nokta kartına dönülür, sıradaki adım orada.'}
+          </p>
+        )}
       </div>
     </form>
   );

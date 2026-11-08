@@ -169,12 +169,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/announcements', label: 'Duyurular', icon: 'megaphone', show: true, badge: annUnread },
     { href: '/performance', label: 'Performans', icon: 'chart', show: true, badge: 0 },
     // ---- SAHA SATIŞ (F01–F11) ----
-    { href: '/sales', label: 'Saha Satış', icon: 'sales', show: true, badge: salesFollowUps },
-    { href: '/sales/routes', label: 'Rota', icon: 'calendar', show: true, badge: 0 },
-    { href: '/sales/outlets', label: 'Noktalar', icon: 'outlet', show: true, badge: 0 },
-    { href: '/sales/visits', label: 'Ziyaretler', icon: 'visit', show: isManagerRole, badge: 0 },
-    { href: '/sales/orders', label: 'Teklif & Sipariş', icon: 'receipt', show: isManagerRole, badge: 0 },
-    { href: '/sales/reports', label: 'Saha Raporları', icon: 'report', show: isManagerRole, badge: 0 },
+    // Saha satışın on bir bölümü tek girişte toplandı; alt sekmeler
+    // /sales kabuğunda açılıyor (src/app/(app)/sales/layout.tsx).
+    { href: '/sales', label: 'Satış & Pazarlama', icon: 'sales', show: true, badge: salesFollowUps },
     // sipariş hattında bu sekme "Sipariş Ver" adıyla görünür (aynı modül)
     { href: '/purchasing', label: isOrderLine ? 'Sipariş Ver' : 'Satın Alma', icon: 'cart', show: true, badge: isOrderLine ? orderPending : 0 },
     { href: '/payments', label: 'Ödeme Talepleri', icon: 'wallet', show: true, badge: 0 },

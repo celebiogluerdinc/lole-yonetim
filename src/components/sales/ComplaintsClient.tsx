@@ -72,7 +72,7 @@ export default function ComplaintsClient({
   }
 
   return (
-    <main className="max-w-4xl mx-auto p-4 md:p-8 space-y-5">
+    <main className="py-5 space-y-5">
       <header className="px-1 flex items-end justify-between gap-3">
         <div>
           <h1 className="text-[28px] leading-tight font-bold tracking-tight">Şikâyet & Tekrar Sipariş</h1>
@@ -88,8 +88,8 @@ export default function ComplaintsClient({
             <ShieldAlert size={16} /> {safetyOpen.length} açık ürün güvenliği şikâyeti var
           </p>
           <p className="text-[13px] mt-1 text-rose-200/80">
-            Bu şikâyetlere bağlı partiler <strong>tadıma kapalıdır</strong> — inceleme kapanana
-            kadar sahada tattırılamaz. Partiler:{' '}
+            İnceleme kapanana kadar bu ürünler sahada <strong>tattırılmamalı</strong> ve
+            satıştan ayrılmalı. İlgili partiler:{' '}
             {safetyOpen.map(c => c.product_batches?.batch_no).filter(Boolean).join(', ') || '(parti girilmemiş)'}
           </p>
         </div>
@@ -136,8 +136,9 @@ export default function ComplaintsClient({
                   <AlertTriangle size={15} className="mt-0.5 shrink-0" />
                   <span>
                     Ürün güvenliği şüphesinde ürün <strong>satıştan ayrılmalı</strong> ve
-                    <strong> yeniden tadım yaptırılmamalı</strong>. Parti seçilirse o parti
-                    otomatik olarak tadıma kapanır. Karantina girilmeden şikâyet "çözüldü" olarak kapatılamaz.
+                    <strong> yeniden tadım yaptırılmamalı</strong>. Parti/TETT yalnızca geri
+                    çağırma izlenebilirliği için kaydedilir. Karantina girilmeden şikâyet
+                    &quot;çözüldü&quot; olarak kapatılamaz.
                   </span>
                 </div>
               )}

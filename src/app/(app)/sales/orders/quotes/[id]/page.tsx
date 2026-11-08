@@ -1,9 +1,9 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getCtx } from '@/lib/auth';
-import { fmtDate } from '@/lib/utils';
+import { fmtDate, TZ } from '@/lib/utils';
 import QuoteDetail from '@/components/sales/QuoteDetail';
-import { QUOTE_STATUS_LABEL, QUOTE_STATUS_COLOR, type QuoteStatus } from '@/components/sales/OrdersClient';
+import { QUOTE_STATUS_LABEL, QUOTE_STATUS_COLOR, type QuoteStatus } from '@/lib/commerce-format';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +33,11 @@ export default async function QuotePage({ params }: { params: { id: string } }) 
       supabase.from('sales_orders').select('id, order_no').eq('quote_id', quote.id).maybeSingle()
     ]);
 
+  // Zincirin bir önceki halkası: teklif bir ziyaretten doğduysa o ziyaret.
+  const { data: srcVisit } = quote.visit_id
+    ? await supabase.from('visits').select('id, visit_date').eq('id', quote.visit_id).maybeSingle()
+    : { data: null as any };
+
   const nameOf = (id: string | null) =>
     id ? ((checkers ?? []).find((p: any) => p.id === id)?.full_name ?? null) : null;
 
@@ -46,10 +51,13 @@ export default async function QuotePage({ params }: { params: { id: string } }) 
   }));
 
   const status = quote.status as QuoteStatus;
-  const canConvert = ['onayli', 'sunuldu'].includes(status) && !order;
+  const canConvert = ['onayli', 'sunuldu', 'kabul'].includes(status) && !order;
+  const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+  const expired = !!quote.valid_until && quote.valid_until < todayIso
+    && ['onayli', 'sunuldu'].includes(status);
 
   return (
-    <main className="max-w-3xl mx-auto p-4 md:p-8 space-y-5">
+    <main className="py-5 space-y-5">
       <header className="card p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -70,11 +78,27 @@ export default async function QuotePage({ params }: { params: { id: string } }) 
           Oluşturma {fmtDate(quote.created_at)}
           {quote.valid_until ? ` · geçerlilik ${fmtDate(quote.valid_until)}` : ''}
         </p>
-        {order && (
-          <Link href={`/sales/orders/${order.id}`}
-            className="mt-3 inline-block text-[13px] text-ios-blue hover:underline">
-            Bu tekliften sipariş oluşturuldu{order.order_no ? ` (#${order.order_no})` : ''} →
+        {/* ZİNCİR: ziyaret → teklif → sipariş. Her halka tek tıkla açılıyor;
+            temsilci belgeler arasında menüye dönmek zorunda kalmıyor. */}
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+          {srcVisit && (
+            <Link href={`/sales/visits/${srcVisit.id}`} className="text-ios-blue hover:underline">
+              ← Kaynak ziyaret ({fmtDate(srcVisit.visit_date)})
+            </Link>
+          )}
+          <Link href={`/sales/orders?outlet=${quote.outlet_id}`} className="text-ios-blue hover:underline">
+            Bu noktanın tüm belgeleri
           </Link>
+          {order && (
+            <Link href={`/sales/orders/${order.id}`} className="text-ios-blue hover:underline">
+              Sipariş{order.order_no ? ` #${order.order_no}` : ''} →
+            </Link>
+          )}
+        </div>
+        {expired && (
+          <p className="mt-3 text-[13px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2">
+            Geçerlilik tarihi geçmiş. Müşteriye sunmadan önce tarihi güncelleyin.
+          </p>
         )}
       </header>
 
@@ -106,6 +130,8 @@ export default async function QuotePage({ params }: { params: { id: string } }) 
         financeName={nameOf(quote.finance_checked_by)}
         salesName={nameOf(quote.sales_checked_by)}
         canConvert={canConvert}
+        hasOrder={!!order}
+        expired={expired}
         orderProps={{
           batches: (batches ?? []) as any,
           defaults: {

@@ -10,7 +10,7 @@ export default async function NewVisitPage({
   const { supabase, companyId } = await getCtx();
 
   const [
-    { data: outlets }, { data: products }, { data: batches },
+    { data: outlets }, { data: products },
     { data: criteria }, { data: reasons }, { data: people }, { data: orders }
   ] = await Promise.all([
     supabase.from('outlets').select('id, name, city, district, status')
@@ -18,10 +18,6 @@ export default async function NewVisitPage({
     companyId
       ? supabase.from('products').select('id, name, taste_reference')
           .eq('company_id', companyId).eq('is_active', true).order('sort_order')
-      : Promise.resolve({ data: [] } as any),
-    companyId
-      ? supabase.from('product_batches').select('id, product_id, batch_no, expiry_date')
-          .eq('company_id', companyId).eq('is_active', true).order('expiry_date')
       : Promise.resolve({ data: [] } as any),
     companyId
       ? supabase.from('score_criteria').select('id, label, grp, applies_to')
@@ -52,7 +48,6 @@ export default async function NewVisitPage({
     <VisitForm
       outlets={(outlets ?? []) as any}
       products={(products ?? []) as any}
-      batches={(batches ?? []) as any}
       criteria={(criteria ?? []) as any}
       reasons={(reasons ?? []) as any}
       people={(people ?? []) as any}

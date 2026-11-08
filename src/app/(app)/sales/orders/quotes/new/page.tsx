@@ -43,6 +43,7 @@ export default async function NewQuotePage({
       outlets={(outlets ?? []) as any}
       products={(products ?? []) as any}
       preselectedOutlet={searchParams.outlet}
+      preselectedVisit={searchParams.visit}
       quote={quote ?? undefined}
       items={items}
       today={today}

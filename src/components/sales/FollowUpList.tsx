@@ -3,9 +3,10 @@
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Check, AlertTriangle, CalendarClock } from 'lucide-react';
+import { Check, AlertTriangle, CalendarClock, MapPin } from 'lucide-react';
 import { fmtDate } from '@/lib/utils';
 import { closeFollowUp } from '@/app/(app)/sales/actions';
+import { addOutletsToDay } from '@/app/(app)/sales/routes/actions';
 
 interface Row {
   id: string;
@@ -57,8 +58,10 @@ export default function FollowUpList({ rows, today }: { rows: Row[]; today: stri
     };
   }, [rows, today]);
 
+  const [msg, setMsg] = useState<string | null>(null);
+
   function close(id: string) {
-    setErr(null);
+    setErr(null); setMsg(null);
     start(async () => {
       const r = await closeFollowUp(id, evidence);
       if (r?.error) { setErr(r.error); return; }
@@ -67,10 +70,27 @@ export default function FollowUpList({ rows, today }: { rows: Row[]; today: stri
     });
   }
 
+  /**
+   * Takibi bugünün rotasına atar.
+   *
+   * Eskiden temsilci geciken bir takibi görüp onu ziyaret etmek için Rota
+   * sekmesine gidip durak eklemek, nokta aramak zorundaydı. Gecikmiş iş
+   * tam da o yüzden gecikmeye devam ediyordu. Artık tek dokunuş.
+   */
+  function toRoute(outletId: string) {
+    setErr(null); setMsg(null);
+    start(async () => {
+      const r = await addOutletsToDay([outletId]);
+      if (r?.error) { setErr(r.error); return; }
+      setMsg('Nokta bugünün rotasına eklendi.');
+      router.refresh();
+    });
+  }
+
   const openCount = groups.overdue.length + groups.today.length + groups.upcoming.length;
 
   return (
-    <main className="max-w-3xl mx-auto p-4 md:p-8 space-y-5">
+    <main className="py-5 space-y-5">
       <header className="px-1">
         <h1 className="text-[28px] leading-tight font-bold tracking-tight">Takipler</h1>
         <p className="text-[14px] text-[#8E8E93]">
@@ -80,6 +100,11 @@ export default function FollowUpList({ rows, today }: { rows: Row[]; today: stri
       </header>
 
       {err && <p className="alert-error">{err}</p>}
+      {msg && (
+        <p className="text-[13px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-3 py-2">
+          {msg}
+        </p>
+      )}
 
       {openCount === 0 && (
         <div className="card p-10 text-center">
@@ -89,11 +114,11 @@ export default function FollowUpList({ rows, today }: { rows: Row[]; today: stri
       )}
 
       <Group title="Gecikmiş" tone="bad" rows={groups.overdue}
-        {...{ openFor, setOpenFor, evidence, setEvidence, close, pending, today }} />
+        {...{ openFor, setOpenFor, evidence, setEvidence, close, pending, today, toRoute }} />
       <Group title="Bugün" tone="warn" rows={groups.today}
-        {...{ openFor, setOpenFor, evidence, setEvidence, close, pending, today }} />
+        {...{ openFor, setOpenFor, evidence, setEvidence, close, pending, today, toRoute }} />
       <Group title="Yaklaşan" rows={groups.upcoming}
-        {...{ openFor, setOpenFor, evidence, setEvidence, close, pending, today }} />
+        {...{ openFor, setOpenFor, evidence, setEvidence, close, pending, today, toRoute }} />
 
       {groups.closed.length > 0 && (
         <section className="card overflow-hidden">
@@ -115,12 +140,13 @@ export default function FollowUpList({ rows, today }: { rows: Row[]; today: stri
 }
 
 function Group({
-  title, tone, rows, openFor, setOpenFor, evidence, setEvidence, close, pending
+  title, tone, rows, openFor, setOpenFor, evidence, setEvidence, close, pending, toRoute
 }: {
   title: string; tone?: 'bad' | 'warn'; rows: Row[];
   openFor: string | null; setOpenFor: (v: string | null) => void;
   evidence: string; setEvidence: (v: string) => void;
   close: (id: string) => void; pending: boolean; today: string;
+  toRoute: (outletId: string) => void;
 }) {
   if (!rows.length) return null;
   const color = tone === 'bad' ? 'text-rose-300' : tone === 'warn' ? 'text-amber-300' : '';
@@ -165,10 +191,24 @@ function Group({
                 </div>
               </div>
             ) : (
-              <button onClick={() => { setOpenFor(r.id); setEvidence(''); }}
-                className="btn-ghost !py-1.5 !text-[13px]">
-                <Check size={14} /> Tamamlandı olarak kapat
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => { setOpenFor(r.id); setEvidence(''); }}
+                  className="btn-ghost !py-1.5 !text-[13px]">
+                  <Check size={14} /> Tamamlandı olarak kapat
+                </button>
+                {r.outlet_id && (
+                  <>
+                    <button onClick={() => toRoute(r.outlet_id!)} disabled={pending}
+                      className="btn-ghost !py-1.5 !text-[13px]">
+                      <MapPin size={14} /> Bugünün rotasına ekle
+                    </button>
+                    <Link href={`/sales/visits/new?outlet=${r.outlet_id}`}
+                      className="btn-ghost !py-1.5 !text-[13px]">
+                      Ziyareti aç
+                    </Link>
+                  </>
+                )}
+              </div>
             )}
           </div>
         ))}

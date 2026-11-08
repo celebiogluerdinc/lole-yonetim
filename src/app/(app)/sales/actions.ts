@@ -65,6 +65,57 @@ function readOutlet(fd: FormData) {
   });
 }
 
+/**
+ * Nokta formundaki muhasebe / satın alma kişilerini yazar.
+ *
+ * Bu iki kişi veritabanında outlet_contacts'ta duruyor ama saha açısından
+ * firma bilgisinin parçası ve nokta kartındaki "eksik bilgi" uyarısının
+ * kaynağı — bu yüzden nokta formuyla aynı gönderimde kaydediliyor.
+ *
+ * Rol başına tek kayıt tutuluyor: aynı rolde kayıt varsa güncellenir,
+ * yoksa açılır. Ad boş bırakılırsa mevcut kayda dokunulmaz (kullanıcı
+ * yalnızca vergi no eklemek için formu açmış olabilir).
+ */
+async function saveRoleContacts(
+  supabase: any, companyId: string, outletId: string, fd: FormData
+) {
+  const s = (k: string) => String(fd.get(k) ?? '').trim();
+  const wanted: { role: 'muhasebe' | 'satin_alma'; prefix: string }[] = [
+    { role: 'muhasebe', prefix: 'acct' },
+    { role: 'satin_alma', prefix: 'purch' }
+  ];
+
+  // Form bu alanları hiç göndermiyorsa (eski sürüm ekran) sessiz geç.
+  if (wanted.every(w => fd.get(`${w.prefix}_name`) === null)) return null;
+
+  const { data: existing } = await supabase.from('outlet_contacts')
+    .select('id, role').eq('outlet_id', outletId);
+
+  for (const w of wanted) {
+    const full_name = s(`${w.prefix}_name`);
+    if (!full_name) continue;
+    if (full_name.length < 2) return `${w.role === 'muhasebe' ? 'Muhasebe' : 'Satın alma'} kişisinin adı en az 2 karakter olmalı.`;
+
+    const row = {
+      full_name,
+      phone: s(`${w.prefix}_phone`) || null,
+      email: s(`${w.prefix}_email`) || null
+    };
+    const hit = (existing ?? []).find((c: any) => c.role === w.role);
+    const { error } = hit
+      ? await supabase.from('outlet_contacts').update(row).eq('id', hit.id)
+      : await supabase.from('outlet_contacts').insert({
+          company_id: companyId,            // NOT NULL
+          outlet_id: outletId,
+          role: w.role,
+          ...row
+          // decision_authority gönderilmiyor: NOT NULL + varsayılan 'yok'
+        });
+    if (error) return `Kişi kaydedilemedi: ${error.message}`;
+  }
+  return null;
+}
+
 /** Yeni nokta açar. Nokta kodu verilmezse şirket içinde sıradan üretilir. */
 export async function createOutlet(formData: FormData) {
   const parsed = readOutlet(formData);
@@ -106,8 +157,12 @@ export async function createOutlet(formData: FormData) {
   }).select('id').single();
   if (error) return { error: error.message };
 
+  // Nokta açıldı; kişiler yazılamazsa noktayı geri almıyoruz — kart zaten
+  // eksik bilgiyi gösterip aynı formdan tamamlatıyor.
+  const cErr = await saveRoleContacts(supabase, companyId, data.id, formData);
+
   revalidatePath('/sales/outlets');
-  return { ok: true, id: data.id as string };
+  return { ok: true, id: data.id as string, warn: cErr ?? undefined };
 }
 
 export async function updateOutlet(formData: FormData) {
@@ -117,7 +172,8 @@ export async function updateOutlet(formData: FormData) {
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Form eksik.' };
   const i = parsed.data;
 
-  const { supabase } = await salesCtx();
+  const { supabase, companyId } = await salesCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
   const { error } = await supabase.from('outlets').update({
     name: i.name,
     type_id: i.type_id || null,
@@ -136,6 +192,9 @@ export async function updateOutlet(formData: FormData) {
     status: i.status
   }).eq('id', id);
   if (error) return { error: error.message };
+
+  const cErr = await saveRoleContacts(supabase, companyId, id, formData);
+  if (cErr) return { error: cErr };
 
   revalidatePath(`/sales/outlets/${id}`);
   revalidatePath('/sales/outlets');
@@ -374,7 +433,7 @@ export async function saveVisit(formData: FormData) {
     outlet_comment: i.outlet_comment || null,
     objection_stated_id: i.objection_stated_id || null,
     objection_real_id: i.objection_real_id || null,
-    objection_note: i.objection_note || null,
+    objection_stated_note: i.objection_note || null,
     our_answer: i.our_answer || null,
     customer_comment: i.customer_comment || null,
     private_note: i.private_note || null,
@@ -431,7 +490,6 @@ export async function saveVisit(formData: FormData) {
         visit_id: id,
         company_id: companyId,
         product_id: pid,
-        batch_id: String(formData.get(`batch_${pid}`) ?? '') || null,
         bottles_opened: Number(formData.get(`opened_${pid}`) ?? 0) || 0,
         bottles_left_sealed: Number(formData.get(`sealed_${pid}`) ?? 0) || 0,
         taste_score: n('taste'),

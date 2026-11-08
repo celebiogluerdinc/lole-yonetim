@@ -81,16 +81,24 @@ const quoteSchema = z.object({
   written_approval_ref: z.string().max(200).optional().default('')
 });
 
-/** Form satırlarını okur: item_<productId>_bottles / _price / _discount */
+/**
+ * Form satırlarını okur: item_<productId>_cases / _price / _discount
+ *
+ * Saha KOLİ ile düşünüyor (1 koli = 12 × 250 ml şişe), veritabanı ŞİŞE
+ * tutuyor. Çevrim tek yerde — burada — yapılır. İki birim iki yerde
+ * dönüştürülseydi er geç biri unuturdu.
+ */
+const BOTTLES_PER_CASE = 12;
 function readQuoteItems(fd: FormData) {
   const rows: { product_id: string; bottles: number; unit_price: number; discount: number; position: number }[] = [];
   let pos = 0;
   for (const key of Array.from(fd.keys())) {
-    const m = key.match(/^item_([0-9a-f-]{36})_bottles$/);
+    const m = key.match(/^item_([0-9a-f-]{36})_cases$/);
     if (!m) continue;
     const pid = m[1];
-    const bottles = Number(String(fd.get(`item_${pid}_bottles`) ?? '').trim());
-    if (!Number.isFinite(bottles) || bottles <= 0) continue;  // boş satır sipariş sayılmaz
+    const cases = Number(String(fd.get(`item_${pid}_cases`) ?? '').trim());
+    if (!Number.isFinite(cases) || cases <= 0) continue;      // boş satır teklife girmez
+    const bottles = Math.round(cases) * BOTTLES_PER_CASE;
     const price = Number(String(fd.get(`item_${pid}_price`) ?? '').trim());
     const disc = Number(String(fd.get(`item_${pid}_discount`) ?? '0').trim());
     rows.push({
@@ -122,7 +130,7 @@ export async function createQuote(formData: FormData) {
   const i = parsed.data;
 
   const items = readQuoteItems(formData);
-  if (!items.length) return { error: 'En az bir ürün için şişe adedi girilmelidir.' };
+  if (!items.length) return { error: 'En az bir ürün için koli adedi girilmelidir.' };
   if (items.some(r => r.unit_price <= 0)) {
     return { error: 'Fiyatı girilmemiş ürün var. Nokta için fiyat anlaşması veya liste fiyatı tanımlı olmalı.' };
   }
@@ -178,7 +186,7 @@ export async function updateQuote(formData: FormData) {
   }
 
   const items = readQuoteItems(formData);
-  if (!items.length) return { error: 'En az bir ürün için şişe adedi girilmelidir.' };
+  if (!items.length) return { error: 'En az bir ürün için koli adedi girilmelidir.' };
 
   const { error } = await supabase.from('quotes').update({
     valid_until: s('valid_until') || null,
@@ -275,7 +283,13 @@ export async function setQuoteStatus(quoteId: string, status: string, rejectReas
 // F06 — SİPARİŞ VE TESLİMAT TALİMATI
 // ============================================================
 
-/** oi_<productId>_paid / _free / _price */
+/**
+ * oi_<productId>_paid_cases / _free_cases / _price
+ *
+ * Saha KOLİ ile düşünür, veritabanı ŞİŞE tutar — teklif formuyla aynı
+ * dönüşüm burada da uygulanıyor (1 koli = 12 × 250 ml şişe). İki ekranın
+ * iki ayrı birimi olması, sahada en sık yapılan hatanın kaynağıydı.
+ */
 function readOrderItems(fd: FormData) {
   const rows: {
     product_id: string; paid_bottles: number; free_bottles: number;
@@ -283,11 +297,13 @@ function readOrderItems(fd: FormData) {
   }[] = [];
   let pos = 0;
   for (const key of Array.from(fd.keys())) {
-    const m = key.match(/^oi_([0-9a-f-]{36})_paid$/);
+    const m = key.match(/^oi_([0-9a-f-]{36})_paid_cases$/);
     if (!m) continue;
     const pid = m[1];
-    const paid = Math.round(Number(String(fd.get(`oi_${pid}_paid`) ?? '0').trim()) || 0);
-    const free = Math.round(Number(String(fd.get(`oi_${pid}_free`) ?? '0').trim()) || 0);
+    const paidCases = Math.round(Number(String(fd.get(`oi_${pid}_paid_cases`) ?? '0').trim()) || 0);
+    const freeCases = Math.round(Number(String(fd.get(`oi_${pid}_free_cases`) ?? '0').trim()) || 0);
+    const paid = Math.max(paidCases, 0) * BOTTLES_PER_CASE;
+    const free = Math.max(freeCases, 0) * BOTTLES_PER_CASE;
     // F06: koli ve şişe aynı miktarın gösterimi — toplanmaz. Gerçek olan şişe.
     if (paid + free <= 0) continue;
     const price = Number(String(fd.get(`oi_${pid}_price`) ?? '0').trim()) || 0;
@@ -325,7 +341,7 @@ export async function createOrderFromQuote(formData: FormData) {
   }
 
   const items = readOrderItems(formData);
-  if (!items.length) return { error: 'En az bir ürün için şişe adedi girilmelidir.' };
+  if (!items.length) return { error: 'En az bir ürün için koli adedi girilmelidir.' };
 
   const { data: outlet } = await supabase.from('outlets')
     .select('legal_name, name, tax_office, tax_number, address, phone')

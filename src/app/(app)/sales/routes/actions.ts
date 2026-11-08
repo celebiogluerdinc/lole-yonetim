@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
+import { TZ } from '@/lib/utils';
 
 /**
  * F01 — GÜNLÜK ROTA VE ZİYARET PLANI
@@ -42,6 +43,179 @@ async function resolveTarget(supabase: any, companyId: string, city: string | nu
   }
   const def = rows.find((r: any) => r.scope === 'varsayilan');
   return def ? Math.round(Number(def.target_value)) : 10;
+}
+
+const isoDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: TZ });
+
+/**
+ * Rotayı var say, yoksa aç.
+ *
+ * Gerekçe: temsilcinin "bu noktayı bugüne ekle" demesi için önce
+ * "rota kur" formunu doldurmak zorunda kalması, tek tıkla yapılacak işi
+ * iki ekrana bölüyordu. Plan yoksa burada sessizce açılıyor; şehir,
+ * eklenen noktaların şehrinden tahmin ediliyor ki hedef doğru çıksın.
+ */
+async function ensureRoutePlan(
+  supabase: any, userId: string, companyId: string, date: string, cityHint: string | null
+): Promise<{ id: string } | { error: string }> {
+  const { data: existing } = await supabase.from('route_plans')
+    .select('id').eq('user_id', userId).eq('plan_date', date).maybeSingle();
+  if (existing) return { id: existing.id as string };
+
+  const target = await resolveTarget(supabase, companyId, cityHint);
+  const { data, error } = await supabase.from('route_plans').insert({
+    company_id: companyId,
+    user_id: userId,
+    plan_date: date,
+    city: cityHint,
+    target_visits: target
+  }).select('id').single();
+  if (error) return { error: error.message };
+  return { id: data.id as string };
+}
+
+/**
+ * Seçilen noktaları bir güne durak olarak ekler (varsayılan: bugün).
+ *
+ * "Bugün" ekranından ve takip listesinden tek dokunuşla çağrılıyor:
+ * geciken bir takibi gördüğü anda temsilci onu rotasına atabiliyor,
+ * aradaki "rota ekranına git, durak ekle, nokta ara" adımları kalktı.
+ * Zaten rotada olan nokta ikinci kez eklenmez.
+ */
+export async function addOutletsToDay(outletIds: string[], date?: string) {
+  const ids = (outletIds ?? []).filter(x => uuid.safeParse(x).success);
+  if (!ids.length) return { error: 'Nokta seçilmedi.' };
+
+  const { supabase, profile, companyId } = await salesCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ? date! : isoDate(new Date());
+
+  const { data: picked } = await supabase.from('outlets')
+    .select('id, name, city').in('id', ids);
+  const rows = picked ?? [];
+  if (!rows.length) return { error: 'Nokta bulunamadı.' };
+
+  const cityHint = rows.find((o: any) => o.city)?.city ?? null;
+  const plan = await ensureRoutePlan(supabase, profile.id, companyId, day, cityHint);
+  if ('error' in plan) return { error: plan.error };
+
+  const { data: current } = await supabase.from('route_stops')
+    .select('outlet_id, position').eq('route_plan_id', plan.id);
+  const already = new Set((current ?? []).map((s: any) => s.outlet_id).filter(Boolean));
+  const nextPos = (current ?? []).length;
+
+  const fresh = rows.filter((o: any) => !already.has(o.id));
+  if (!fresh.length) return { error: 'Seçilen noktalar bugünün rotasında zaten var.' };
+
+  const { error } = await supabase.from('route_stops').insert(
+    fresh.map((o: any, idx: number) => ({
+      route_plan_id: plan.id,
+      company_id: companyId,
+      outlet_id: o.id,
+      position: nextPos + idx
+    }))
+  );
+  if (error) return { error: error.message };
+
+  revalidatePath('/sales');
+  revalidatePath('/sales/routes');
+  revalidatePath('/sales/follow-ups');
+  return { ok: true, added: fresh.length };
+}
+
+/**
+ * Günü boş sayfadan başlatmamak için: sistem bugünü ÖNERİR.
+ *
+ * Sıra önemli — temsilcinin zamanı sınırlı, en pahalı iş en önce:
+ *   1) geciken takiplerin noktaları (söz verilmiş, gecikmiş iş)
+ *   2) bugün vadesi gelen takiplerin noktaları
+ *   3) uzun süre ziyaret edilmemiş A, sonra B segment noktalar
+ * Hedef sayısı kadar durak önerilir; temsilci sonra düzenler.
+ */
+export async function seedDayRoute(date?: string) {
+  const { supabase, profile, companyId } = await salesCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ? date! : isoDate(new Date());
+  const since14 = new Date(Date.now() - 14 * 86400000).toISOString();
+
+  const [{ data: fups }, { data: neglected }] = await Promise.all([
+    supabase.from('follow_ups')
+      .select('outlet_id, due_date')
+      .eq('owner_user_id', profile.id).eq('status', 'acik')
+      .lte('due_date', day).not('outlet_id', 'is', null)
+      .order('due_date').limit(40),
+    supabase.from('outlets')
+      .select('id, city, segment, last_visit_at')
+      .eq('company_id', companyId).eq('is_active', true).in('segment', ['A', 'B'])
+      .or(`last_visit_at.is.null,last_visit_at.lt.${since14}`)
+      .order('last_visit_at', { ascending: true, nullsFirst: true })
+      .limit(60)
+  ]);
+
+  const ordered: string[] = [];
+  const push = (id: string | null) => {
+    if (id && !ordered.includes(id)) ordered.push(id);
+  };
+  for (const f of fups ?? []) push(f.outlet_id);
+  for (const o of (neglected ?? []).filter((x: any) => x.segment === 'A')) push(o.id);
+  for (const o of (neglected ?? []).filter((x: any) => x.segment === 'B')) push(o.id);
+
+  if (!ordered.length) {
+    return { error: 'Önerilecek nokta bulunamadı — rotayı elle kurun.' };
+  }
+
+  const cityHint = (neglected ?? []).find((o: any) => o.city)?.city ?? null;
+  const target = await resolveTarget(supabase, companyId, cityHint);
+
+  const r = await addOutletsToDay(ordered.slice(0, target), day);
+  if ('error' in r && r.error) return r;
+  return { ok: true, added: (r as any).added as number };
+}
+
+/**
+ * Durakları ilçeye göre yeniden sıralar.
+ *
+ * Şehirde gidip gelmek, saha temsilcisinin en büyük zaman kaybı. Rotayı
+ * elle kurarken duraklar akla geldiği sırada giriliyor; bu tek düğme onları
+ * ilçe ilçe toplar, ilçe içinde de saate göre sıralar. Gerçekleşmiş duraklar
+ * listenin başında kalır — geçmişi karıştırmanın anlamı yok.
+ */
+export async function groupStopsByDistrict(planId: string) {
+  if (!uuid.safeParse(planId).success) return { error: 'Geçersiz rota.' };
+  const { supabase } = await salesCtx();
+
+  const { data: stops, error } = await supabase.from('route_stops')
+    .select('id, planned_time, position, status, outlets:outlet_id(district)')
+    .eq('route_plan_id', planId);
+  if (error) return { error: error.message };
+  if (!stops || stops.length < 2) return { error: 'Sıralanacak yeterli durak yok.' };
+
+  const key = (s: any) => (s.outlets?.district ?? '￿').toLocaleLowerCase('tr-TR');
+  const sorted = [...stops].sort((a: any, b: any) => {
+    // önce işi bitmiş duraklar, sonra bekleyenler
+    const ad = a.status === 'planlandi' ? 1 : 0;
+    const bd = b.status === 'planlandi' ? 1 : 0;
+    if (ad !== bd) return ad - bd;
+    const k = key(a).localeCompare(key(b), 'tr');
+    if (k !== 0) return k;
+    const at = a.planned_time ?? '99:99';
+    const bt = b.planned_time ?? '99:99';
+    if (at !== bt) return at < bt ? -1 : 1;
+    return a.position - b.position;
+  });
+
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i].position === i) continue;
+    const { error: e } = await supabase.from('route_stops')
+      .update({ position: i }).eq('id', sorted[i].id);
+    if (e) return { error: e.message };
+  }
+
+  revalidatePath('/sales/routes');
+  revalidatePath('/sales');
+  return { ok: true };
 }
 
 export async function createRoutePlan(formData: FormData) {

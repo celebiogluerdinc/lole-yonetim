@@ -4,18 +4,41 @@ import OrdersClient from '@/components/sales/OrdersClient';
 
 export const dynamic = 'force-dynamic';
 
-export default async function OrdersPage() {
+/**
+ * Teklif ve sipariş listesi.
+ *
+ * `?outlet=<id>` ile nokta kartından gelindiğinde liste o noktaya
+ * daraltılıyor ve "Yeni Teklif" de aynı noktaya kilitli açılıyor —
+ * nokta kartından çıkıp yeniden nokta seçmek zorunda kalmamak için.
+ * `?tab=orders` doğrudan sipariş sekmesini açar.
+ */
+export default async function OrdersPage({
+  searchParams
+}: { searchParams: { outlet?: string; tab?: string } }) {
   const { supabase } = await getCtx();
+
+  const outletId = searchParams.outlet;
 
   // RLS kapsamı belirliyor: temsilci kendi belgelerini, müdür ekibininkini,
   // admin hepsini görür. Burada ek filtre gereksiz.
-  const [{ data: quotes }, { data: orders }] = await Promise.all([
-    supabase.from('quotes')
-      .select('id, quote_no, status, total_incl_vat, valid_until, created_at, finance_checked_at, sales_checked_at, outlets:outlet_id(name, district)')
-      .order('created_at', { ascending: false }).limit(200),
-    supabase.from('sales_orders')
-      .select('id, order_no, status, total_amount, delivery_date, created_at, stock_confirmed_at, outlets:outlet_id(name, district)')
-      .order('created_at', { ascending: false }).limit(200)
+  let qSel = supabase.from('quotes')
+    .select('id, quote_no, status, total_incl_vat, valid_until, created_at, finance_checked_at, sales_checked_at, outlets:outlet_id(name, district)')
+    .order('created_at', { ascending: false }).limit(200);
+  let oSel = supabase.from('sales_orders')
+    .select('id, order_no, status, total_amount, delivery_date, created_at, stock_confirmed_at, outlets:outlet_id(name, district)')
+    .order('created_at', { ascending: false }).limit(200);
+
+  if (outletId) {
+    qSel = qSel.eq('outlet_id', outletId);
+    oSel = oSel.eq('outlet_id', outletId);
+  }
+
+  const [{ data: quotes }, { data: orders }, { data: outlet }] = await Promise.all([
+    qSel,
+    oSel,
+    outletId
+      ? supabase.from('outlets').select('name').eq('id', outletId).maybeSingle()
+      : Promise.resolve({ data: null } as any)
   ]);
 
   const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
@@ -25,6 +48,9 @@ export default async function OrdersPage() {
       quotes={(quotes ?? []) as any}
       orders={(orders ?? []) as any}
       todayIso={todayIso}
+      outletId={outletId}
+      outletName={outlet?.name ?? null}
+      initialTab={searchParams.tab === 'orders' ? 'orders' : 'quotes'}
     />
   );
 }
