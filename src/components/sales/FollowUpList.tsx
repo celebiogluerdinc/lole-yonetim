@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Check, AlertTriangle, CalendarClock, MapPin } from 'lucide-react';
 import { fmtDate } from '@/lib/utils';
-import { closeFollowUp } from '@/app/(app)/sales/actions';
+import { closeFollowUp, deleteFollowUp } from '@/app/(app)/sales/actions';
+import DeleteButton from '@/components/sales/DeleteButton';
 import { addOutletsToDay } from '@/app/(app)/sales/routes/actions';
 
 interface Row {
@@ -208,6 +209,10 @@ function Group({
                     </Link>
                   </>
                 )}
+                {/* Yanlış açılan takip gün boyu kırmızı rozet gösteriyordu */}
+                <DeleteButton
+                  message={`"${r.action}" takibi silinecek. Kapanış kanıtı gerekmeyen, yanlışlıkla açılmış takipler için.`}
+                  action={() => deleteFollowUp(r.id)} />
               </div>
             )}
           </div>

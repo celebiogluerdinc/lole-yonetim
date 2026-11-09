@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
+import { deleteBlock, deleteMessage, logDeletion } from '@/lib/sales-delete';
 
 /**
  * SAHA SATIŞ — server action'ları (Faz 1)
@@ -20,6 +21,12 @@ async function salesCtx() {
   const ctx = await getCtx();
   if (ctx.isCustomer) throw new Error('Bu bölüme erişiminiz yok.');
   return ctx;
+}
+
+/** Silme yetkisi: admin ve departman müdürü. Veritabanı da aynı kuralı uyguluyor. */
+function canDelete(ctx: Awaited<ReturnType<typeof salesCtx>>): boolean {
+  return ['super_admin', 'admin'].includes(ctx.profile.role)
+    || ctx.managedDepartmentIds.length > 0;
 }
 
 // ============================================================
@@ -249,6 +256,62 @@ export async function addOutletContact(formData: FormData) {
   if (error) return { error: error.message };
   revalidatePath(`/sales/outlets/${i.outlet_id}`);
   return { ok: true };
+}
+
+/**
+ * Noktayı siler; bağlı kaydı varsa PASİFE alır.
+ *
+ * Veritabanındaki `trg_outlet_delete_guard` bağlı kayıt varsa silmeyi
+ * reddediyor (nokta CASCADE ile ziyaret/teklif/siparişe bağlı — korumasız
+ * bir silme tüm ticari geçmişi sessizce götürürdü). O hatayı burada
+ * yakalayıp pasife alıyoruz: nokta listelerden kalkıyor, geçmiş kalıyor.
+ */
+export async function deleteOutlet(outletId: string, reason?: string) {
+  if (!uuid.safeParse(outletId).success) return { error: 'Geçersiz nokta.' };
+  const ctx = await salesCtx();
+  if (!canDelete(ctx)) return { error: 'Nokta silme yetkisi yalnızca admin ve müdürde.' };
+  const { supabase, profile, companyId } = ctx;
+
+  const { data: o } = await supabase.from('outlets')
+    .select('id, name, status').eq('id', outletId).maybeSingle();
+  if (!o) return { error: 'Nokta bulunamadı.' };
+
+  const { error } = await supabase.from('outlets').delete().eq('id', outletId);
+
+  if (error) {
+    if (deleteBlock(error.message) === 'bagli_kayit') {
+      const { error: e2 } = await supabase.from('outlets')
+        .update({ status: 'pasif', is_active: false }).eq('id', outletId);
+      if (e2) return { error: e2.message };
+      await logDeletion(supabase, companyId, profile.id, 'outlet', outletId,
+        `${o.name} (pasife alındı)`, reason);
+      revalidatePath('/sales/outlets');
+      revalidatePath(`/sales/outlets/${outletId}`);
+      return { blocked: true as const, message: deleteMessage(error.message) };
+    }
+    return { error: deleteMessage(error.message) };
+  }
+
+  await logDeletion(supabase, companyId, profile.id, 'outlet', outletId, o.name, reason);
+  revalidatePath('/sales/outlets');
+  revalidatePath('/sales');
+  return { ok: true as const };
+}
+
+/** Pasife alma / geri açma — silmeden listeden kaldırmanın yolu. */
+export async function setOutletActive(outletId: string, active: boolean) {
+  if (!uuid.safeParse(outletId).success) return { error: 'Geçersiz nokta.' };
+  const ctx = await salesCtx();
+  if (!canDelete(ctx)) return { error: 'Bu işlem için admin veya müdür olmalısınız.' };
+
+  const { error } = await ctx.supabase.from('outlets').update(
+    active ? { is_active: true, status: 'aday' } : { is_active: false, status: 'pasif' }
+  ).eq('id', outletId);
+  if (error) return { error: error.message };
+
+  revalidatePath('/sales/outlets');
+  revalidatePath(`/sales/outlets/${outletId}`);
+  return { ok: true as const };
 }
 
 export async function deleteOutletContact(contactId: string) {
@@ -544,20 +607,60 @@ export async function saveVisit(formData: FormData) {
   return { ok: true, id };
 }
 
-/** Taslak ziyareti siler (yalnızca sahibi, yalnızca taslakken). */
-export async function deleteVisit(visitId: string) {
+/**
+ * Ziyareti siler.
+ *
+ * Temsilci yalnızca KENDİ TASLAĞINI silebilir: gönderilmiş ziyaret artık
+ * veri tarihidir, puan ortalamasını ve itiraz dağılımını besliyor.
+ * Gönderilmiş kaydı admin ve müdür silebilir — yanlış noktaya girilen
+ * ziyaret tek tek düzeltilebilsin diye.
+ */
+export async function deleteVisit(visitId: string, reason?: string) {
   if (!uuid.safeParse(visitId).success) return { error: 'Geçersiz ziyaret.' };
-  const { supabase, profile } = await salesCtx();
+  const ctx = await salesCtx();
+  const { supabase, profile, companyId } = ctx;
+
   const { data: v } = await supabase.from('visits')
-    .select('id, user_id, status, outlet_id').eq('id', visitId).maybeSingle();
+    .select('id, user_id, status, outlet_id, visit_date, outlets:outlet_id(name)')
+    .eq('id', visitId).maybeSingle();
   if (!v) return { error: 'Ziyaret bulunamadı.' };
-  if (v.user_id !== profile.id || v.status !== 'taslak') {
-    return { error: 'Yalnızca kendi taslak ziyaretinizi silebilirsiniz.' };
+
+  const own = v.user_id === profile.id && v.status === 'taslak';
+  if (!own && !canDelete(ctx)) {
+    return { error: 'Gönderilmiş ziyareti yalnızca admin veya müdür silebilir.' };
   }
+
   const { error } = await supabase.from('visits').delete().eq('id', visitId);
-  if (error) return { error: error.message };
+  if (error) return { error: deleteMessage(error.message) };
+
+  await logDeletion(supabase, companyId, profile.id, 'visit', visitId,
+    `${(v as any).outlets?.name ?? 'Nokta'} · ${v.visit_date}`, reason);
   revalidatePath('/sales/visits');
-  return { ok: true };
+  revalidatePath(`/sales/outlets/${v.outlet_id}`);
+  revalidatePath('/sales');
+  return { ok: true as const };
+}
+
+/** Takibi siler. Yanlış açılan takip gün boyu kırmızı rozet gösteriyordu. */
+export async function deleteFollowUp(id: string, reason?: string) {
+  if (!uuid.safeParse(id).success) return { error: 'Geçersiz takip.' };
+  const ctx = await salesCtx();
+  const { supabase, profile, companyId } = ctx;
+
+  const { data: f } = await supabase.from('follow_ups')
+    .select('id, action, created_by, outlet_id').eq('id', id).maybeSingle();
+  if (!f) return { error: 'Takip bulunamadı.' };
+  if (f.created_by !== profile.id && !canDelete(ctx)) {
+    return { error: 'Başkasının açtığı takibi yalnızca admin veya müdür silebilir.' };
+  }
+
+  const { error } = await supabase.from('follow_ups').delete().eq('id', id);
+  if (error) return { error: deleteMessage(error.message) };
+
+  await logDeletion(supabase, companyId, profile.id, 'follow_up', id, f.action ?? '—', reason);
+  revalidatePath('/sales/follow-ups');
+  revalidatePath('/sales');
+  return { ok: true as const };
 }
 
 // ============================================================

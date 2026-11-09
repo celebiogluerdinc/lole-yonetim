@@ -1,5 +1,5 @@
 import { getCtx } from '@/lib/auth';
-import { TZ } from '@/lib/utils';
+import { salesBadges } from '@/lib/sales-badges';
 import SalesTabs, { type SalesTab } from '@/components/sales/SalesTabs';
 
 export const dynamic = 'force-dynamic';
@@ -11,39 +11,43 @@ export const dynamic = 'force-dynamic';
  * olarak açılıyor. Böylece hem kenar çubuğu şişmiyor hem de modülün bir
  * bütün olduğu görünüyor.
  *
- * Sekmeler role göre filtreleniyor: saha temsilcisi beş sekme görüyor,
- * müdür hepsini. Temsilciye raporu ve ayarları göstermek, günlük işinde
- * kullanmayacağı seçeneklerle dikkatini dağıtmak olurdu.
+ * Sekmeler role göre filtreleniyor: saha temsilcisi günlük akışı,
+ * müdür yönetim bölümlerini de görüyor.
+ *
+ * Rozetler: üç sayaç TEK turda (Promise.all) alınıyor. `head: true` ile
+ * satır gövdesi taşınmıyor — yalnızca sayı dönüyor.
  */
 export default async function SalesLayout({ children }: { children: React.ReactNode }) {
-  const { supabase, profile, managedDepartmentIds } = await getCtx();
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
 
   const isManager =
     ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
   const isAdmin = ['super_admin', 'admin'].includes(profile.role);
 
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+  // Kenar çubuğu da aynı sayaçları gösteriyor; `cache()` sayesinde
+  // sorgu istek başına bir kez çalışıyor.
+  const { dueFollowUps, draftVisits, pendingOrders } =
+    await salesBadges(supabase, profile.id, companyId);
 
-  // Rozet: bana ait, vadesi gelmiş açık takipler. Tek sorgu.
-  const { count: dueFollowUps } = await supabase
-    .from('follow_ups').select('id', { count: 'exact', head: true })
-    .eq('owner_user_id', profile.id).eq('status', 'acik').lte('due_date', today);
+  const all: (SalesTab & { show: boolean })[] = [
+    { href: '/sales', label: 'Bugün', icon: 'bugun', group: 'gun', show: true },
+    { href: '/sales/routes', label: 'Rota', icon: 'rota', group: 'gun', show: true },
+    { href: '/sales/outlets', label: 'Noktalar', icon: 'noktalar', group: 'gun', show: true },
+    { href: '/sales/visits', label: 'Ziyaretler', icon: 'ziyaretler', group: 'gun', show: true,
+      badge: draftVisits ?? 0 },
+    { href: '/sales/follow-ups', label: 'Takipler', icon: 'takipler', group: 'gun', show: true,
+      badge: dueFollowUps ?? 0, warn: true },
+    { href: '/sales/orders', label: 'Teklif & Sipariş', icon: 'ticaret', group: 'gun', show: true,
+      badge: pendingOrders ?? 0, warn: true },
+    { href: '/sales/execution', label: 'Saha İcra', icon: 'icra', group: 'yonetim', show: isManager },
+    { href: '/sales/complaints', label: 'Şikâyetler', icon: 'sikayet', group: 'yonetim', show: isManager },
+    { href: '/sales/products', label: 'Ürünler', icon: 'urun', group: 'yonetim', show: isManager },
+    { href: '/sales/reports', label: 'Raporlar', icon: 'rapor', group: 'yonetim', show: isManager },
+    { href: '/sales/settings', label: 'Ayarlar', icon: 'ayar', group: 'yonetim', show: isAdmin }
+  ];
 
-  const tabs: SalesTab[] = ([
-    { href: '/sales', label: 'Bugün', show: true, badge: 0 },
-    { href: '/sales/routes', label: 'Rota', show: true, badge: 0 },
-    { href: '/sales/outlets', label: 'Noktalar', show: true, badge: 0 },
-    { href: '/sales/visits', label: 'Ziyaretler', show: true, badge: 0 },
-    { href: '/sales/follow-ups', label: 'Takipler', show: true, badge: dueFollowUps ?? 0 },
-    { href: '/sales/orders', label: 'Teklif & Sipariş', show: true, badge: 0 },
-    { href: '/sales/execution', label: 'Saha İcra', show: isManager, badge: 0 },
-    { href: '/sales/complaints', label: 'Şikâyetler', show: isManager, badge: 0 },
-    { href: '/sales/products', label: 'Ürünler', show: isManager, badge: 0 },
-    { href: '/sales/reports', label: 'Raporlar', show: isManager, badge: 0 },
-    { href: '/sales/settings', label: 'Ayarlar', show: isAdmin, badge: 0 }
-  ] as const)
-    .filter(t => t.show)
-    .map(({ href, label, badge }) => ({ href, label, badge }));
+  const tabs: SalesTab[] = all.filter(t => t.show)
+    .map(({ show, ...t }) => ({ ...t, badge: t.badge ?? 0, warn: t.warn ?? false }));
 
   return (
     <div className="max-w-5xl mx-auto px-4 md:px-8">

@@ -10,6 +10,7 @@ import AssessmentForm from '@/components/sales/AssessmentForm';
 import OutletContacts from '@/components/sales/OutletContacts';
 import SupplySettings from '@/components/sales/SupplySettings';
 import OutletEdit from '@/components/sales/OutletEdit';
+import OutletDangerZone from '@/components/sales/OutletDangerZone';
 import { ArrowRight, AlertTriangle, MapPin, Phone, Clock, Pencil } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +23,7 @@ export default async function OutletPage({ params }: { params: { id: string } })
 
   const [
     { data: contacts }, { data: assessments }, { data: visits },
-    { data: criteria }, { data: type }, { count: quoteCount }, { count: orderCount }
+    { data: criteria }, { data: type }, { data: quoteAny }, { data: orderAny }
   ] = await Promise.all([
     supabase.from('outlet_contacts').select('*').eq('outlet_id', outlet.id)
       .order('is_primary', { ascending: false }),
@@ -40,9 +41,14 @@ export default async function OutletPage({ params }: { params: { id: string } })
     outlet.type_id
       ? supabase.from('outlet_types').select('name, channel').eq('id', outlet.type_id).maybeSingle()
       : Promise.resolve({ data: null } as any),
-    supabase.from('quotes').select('id', { count: 'exact', head: true }).eq('outlet_id', outlet.id),
-    supabase.from('sales_orders').select('id', { count: 'exact', head: true }).eq('outlet_id', outlet.id)
+    // Sayıya değil VARLIĞA bakıyoruz: exact count tüm satırları sayar,
+    // burada tek soru "hiç var mı" — limit(1) yeterli ve ucuz.
+    supabase.from('quotes').select('id').eq('outlet_id', outlet.id).limit(1),
+    supabase.from('sales_orders').select('id').eq('outlet_id', outlet.id).limit(1)
   ]);
+
+  const hasQuote = (quoteAny ?? []).length > 0;
+  const hasOrder = (orderAny ?? []).length > 0;
 
   const { data: allTypes } = companyId
     ? await supabase.from('outlet_types')
@@ -85,15 +91,15 @@ export default async function OutletPage({ params }: { params: { id: string } })
       href: `/sales/visits/new?outlet=${outlet.id}`,
       cta: 'Ziyaret kaydet'
     };
-    if (!(quoteCount ?? 0) && !(orderCount ?? 0)) return {
+    if (!hasQuote && !hasOrder) return {
       title: 'Teklif oluştur',
       note: missing.length
         ? `Teklif için eksik: ${missing.join(', ')}.`
-        : 'Ziyaret yapıldı, bilgiler tam. Koli fiyatı üzerinden teklif çıkarılabilir.',
+        : 'Ziyaret yapıldı, bilgiler tam. Fiyat sözlü verildiyse "Doğrudan sipariş" ile teklif adımı atlanabilir.',
       href: `/sales/orders/quotes/new?outlet=${outlet.id}`,
       cta: 'Teklif oluştur'
     };
-    if (!(orderCount ?? 0)) return {
+    if (!hasOrder) return {
       title: 'Teklifi siparişe çevir',
       note: 'Teklif verildi, sipariş kaydı yok. Onay alındıysa siparişe dönüştürün.',
       href: `/sales/orders?outlet=${outlet.id}`,
@@ -160,6 +166,10 @@ export default async function OutletPage({ params }: { params: { id: string } })
             {next.cta} <ArrowRight size={16} />
           </Link>
           <Link href={`/sales/visits/new?outlet=${outlet.id}`} className="btn-ghost">Ziyaret</Link>
+          {/* Sahada sözlü fiyat verilip kabul edildiyse teklif adımı beklenmiyor */}
+          <Link href={`/sales/orders/direct/new?outlet=${outlet.id}`} className="btn-ghost">
+            Doğrudan sipariş
+          </Link>
           <Link href={`/sales/orders?outlet=${outlet.id}`} className="btn-ghost">Teklif &amp; Sipariş</Link>
         </div>
 
@@ -337,6 +347,14 @@ export default async function OutletPage({ params }: { params: { id: string } })
           <p className="text-[13px] text-[#8E8E93] mt-3">
             Son ziyaret: {outlet.last_visit_at ? fmtDate(outlet.last_visit_at) : 'Hiç'}
           </p>
+
+          <div className="mt-4">
+            <OutletDangerZone
+              outletId={outlet.id}
+              name={outlet.name}
+              isActive={outlet.is_active !== false}
+            />
+          </div>
 
           <div className="mt-4">
             <SupplySettings

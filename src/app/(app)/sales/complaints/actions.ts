@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
+import { deleteMessage, logDeletion } from '@/lib/sales-delete';
 
 /**
  * F11 Hasar/şikâyet · F10 Takip ve tekrar sipariş
@@ -155,6 +156,32 @@ export async function updateComplaint(formData: FormData) {
  * Formül veritabanındaki fn_reorder_suggestion'da duruyor; burada
  * tekrar yazılsaydı iki ayrı doğru olur ve biri sessizce eskirdi.
  */
+/**
+ * Şikâyet kaydını siler (admin / departman müdürü).
+ * Yanlış noktaya veya iki kez girilen şikâyet ürün güvenliği
+ * uyarılarını ve karantina sayısını yanlış gösteriyordu.
+ */
+export async function deleteComplaint(id: string, reason?: string) {
+  if (!uuid.safeParse(id).success) return { error: 'Geçersiz kayıt.' };
+  const ctx = await salesCtx();
+  const isManager = ['super_admin', 'admin'].includes(ctx.profile.role)
+    || ctx.managedDepartmentIds.length > 0;
+  if (!isManager) return { error: 'Şikâyet silme yetkisi yalnızca admin ve müdürde.' };
+
+  const { supabase, profile, companyId } = ctx;
+  const { data: c } = await supabase.from('outlet_complaints')
+    .select('id, event_description, outlets:outlet_id(name)').eq('id', id).maybeSingle();
+  if (!c) return { error: 'Şikâyet bulunamadı.' };
+
+  const { error } = await supabase.from('outlet_complaints').delete().eq('id', id);
+  if (error) return { error: deleteMessage(error.message) };
+
+  await logDeletion(supabase, companyId, profile.id, 'complaint', id,
+    `${(c as any).outlets?.name ?? 'Nokta'} · ${(c.event_description ?? '').slice(0, 60)}`, reason);
+  revalidatePath('/sales/complaints');
+  return { ok: true as const };
+}
+
 export async function reorderSuggestion(
   outletId: string, dailySales: number, currentStock: number, nextCheckDays: number
 ) {

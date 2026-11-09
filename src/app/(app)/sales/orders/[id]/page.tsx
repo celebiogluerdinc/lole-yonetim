@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { getCtx } from '@/lib/auth';
 import { fmtDate } from '@/lib/utils';
 import OrderDetailActions from '@/components/sales/OrderDetailActions';
+import PrintButton from '@/components/sales/PrintButton';
+import { OrderDeleteButton } from '@/components/sales/DocDeleteButtons';
 import { SalesStep } from '@/components/sales/OrdersClient';
 import {
   ORDER_STATUS_LABEL, ORDER_STATUS_COLOR, tl, casesOf, type OrderStatus
@@ -47,7 +49,14 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
   const freeTotal = (items ?? []).reduce((s: number, i: any) => s + (i.free_bottles ?? 0), 0);
 
   return (
-    <main className="py-5 space-y-5">
+    <main id="print-area" className="py-5 space-y-5">
+      {/* Çıktı: müşteriye verilecek belge — yazdırma ekrandaki kartı
+          olduğu gibi alıyor, ayrı bir PDF şablonu tutulmuyor. */}
+      <div className="flex flex-wrap gap-2 px-1" data-noprint>
+        <PrintButton label="Siparişi yazdır" />
+        <OrderDeleteButton orderId={order.id} orderNo={order.order_no} />
+      </div>
+
       <header className="card p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">

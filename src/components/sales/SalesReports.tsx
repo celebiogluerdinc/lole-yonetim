@@ -1,8 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Download } from 'lucide-react';
 import { CHANNEL_LABEL, OUTCOME_LABEL, type OutletChannel } from '@/lib/sales-types';
+import ListExport from '@/components/sales/ListExport';
+import PrintButton from '@/components/sales/PrintButton';
 
 interface Reason { id: string; label: string }
 type Period = 'gunluk' | 'haftalik' | 'aylik';
@@ -161,37 +162,36 @@ export default function SalesReports({
       .reduce((a, o) => a + Number(o.total_amount ?? 0), 0);
   }, [orders, from]);
 
-  function exportCsv() {
-    const esc = (s: any) => `"${String(s ?? '').replace(/"/g, '""')}"`;
-    const lines = [['Tarih', 'Nokta', 'Şehir', 'Temsilci', 'Sonuç', 'Beyan itiraz', 'Gerçek neden']
-      .map(esc).join(';')];
-    for (const r of rows) {
-      lines.push([
-        r.visit_date, r.outlets?.name, r.outlets?.city, r.profiles?.full_name,
-        OUTCOME_LABEL[r.outcome as keyof typeof OUTCOME_LABEL] ?? r.outcome,
-        reasonLabel(r.objection_stated_id) ?? '', reasonLabel(r.objection_real_id) ?? ''
-      ].map(esc).join(';'));
-    }
-    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `saha-rapor-${period}-${today}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
+  /* Çıktı sütunları — Excel, pano ve yazdırma aynı tanımı kullanıyor
+     (@/lib/csv). Önce burada elle CSV kuruluyordu; iki yerde iki ayrı
+     biçim çıkmasın diye ortak bileşene taşındı. */
+  const exportCols = useMemo(() => [
+    { key: 'tarih', label: 'Tarih', get: (r: any) => r.visit_date },
+    { key: 'nokta', label: 'Nokta', get: (r: any) => r.outlets?.name ?? '' },
+    { key: 'ilce', label: 'İlçe', get: (r: any) => r.outlets?.district ?? '' },
+    { key: 'sehir', label: 'Şehir', get: (r: any) => r.outlets?.city ?? '' },
+    { key: 'temsilci', label: 'Temsilci', get: (r: any) => r.profiles?.full_name ?? '' },
+    { key: 'sonuc', label: 'Sonuç',
+      get: (r: any) => OUTCOME_LABEL[r.outcome as keyof typeof OUTCOME_LABEL] ?? r.outcome },
+    { key: 'puan', label: 'Puan', get: (r: any) => r.overall_score ?? '' },
+    { key: 'beyan', label: 'Beyan edilen itiraz', get: (r: any) => reasonLabel(r.objection_stated_id) ?? '' },
+    { key: 'gercek', label: 'Gerçek neden', get: (r: any) => reasonLabel(r.objection_real_id) ?? '' }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [reasons]);
 
   const maxFunnel = Math.max(1, ...funnel.map(f => f.n));
 
   return (
-    <main className="py-5 space-y-5">
-      <header className="px-1 flex items-end justify-between gap-3">
+    <main id="print-area" className="py-5 space-y-5">
+      <header className="px-1 space-y-2">
         <div>
           <h1 className="text-[28px] leading-tight font-bold tracking-tight">Raporlar</h1>
           <p className="text-[14px] text-[#8E8E93]">{from} — {today}</p>
         </div>
-        <button onClick={exportCsv} className="btn-ghost text-sm shrink-0">
-          <Download size={15} /> CSV
-        </button>
+        <div className="flex items-center gap-2 flex-wrap" data-noprint>
+          <ListExport rows={rows} cols={exportCols} name={`saha-rapor-${period}`} />
+          <PrintButton label="Raporu yazdır" />
+        </div>
       </header>
 
       <div className="flex flex-wrap gap-2">

@@ -10,6 +10,8 @@ import {
 import { SalesStep, NextStepCard } from '@/components/sales/OrdersClient';
 import { tl, casesOf, type QuoteStatus } from '@/lib/commerce-format';
 import OrderFromQuote from '@/components/sales/OrderFromQuote';
+import PrintButton from '@/components/sales/PrintButton';
+import { QuoteDeleteButton } from '@/components/sales/DocDeleteButtons';
 
 interface Line { product_id: string; product_name: string; bottles: number; unit_price: number; discount: number; net_line: number }
 interface PersonLite { id: string; full_name: string }
@@ -160,8 +162,13 @@ export default function QuoteDetail({
   })();
 
   return (
-    <div className="space-y-5">
+    <div id="print-area" className="space-y-5">
       {err && <p className="alert-error">{err}</p>}
+
+      <div className="flex flex-wrap gap-2" data-noprint>
+        <PrintButton label="Teklifi yazdır" />
+        <QuoteDeleteButton quoteId={quote.id} quoteNo={quote.quote_no} />
+      </div>
 
       <NextStepCard title={nextStep.title} hint={nextStep.hint} blocked={nextStep.blocked}>
         {nextStep.button}

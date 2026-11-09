@@ -34,8 +34,10 @@ export const getCtx = cache(async (): Promise<Ctx> => {
   if (!user) redirect('/login');
 
   // profile + managed departments in parallel (one round trip of latency, not two)
+  // `companies:company_id(kind)` ile şirket türü de aynı turda geliyor:
+  // önceden ayrı ve SIRALI bir sorguydu, her sayfaya bir ağ turu ekliyordu.
   const [{ data: profile }, { data: managed }] = await Promise.all([
-    supabase.from('profiles').select('*').eq('id', user.id).single(),
+    supabase.from('profiles').select('*, companies:company_id(kind)').eq('id', user.id).single(),
     supabase.from('department_members')
       .select('department_id')
       .eq('user_id', user.id)
@@ -61,15 +63,24 @@ export const getCtx = cache(async (): Promise<Ctx> => {
 
   const managedDepartmentIds = (managed ?? []).map((m: any) => m.department_id);
 
-  // aktif şirketin türü (sipariş hattı mı?) — tek satırlık, birincil anahtar sorgusu.
-  // getCtx React cache() içinde olduğu için istek başına yalnızca bir kez çalışır.
+  // Aktif şirketin türü (sipariş hattı mı?).
+  // Çalıştığı şirket kendi şirketiyse tür profil sorgusundan geliyor —
+  // ek ağ turu yok. Yalnızca admin/super_admin çerez ile BAŞKA bir
+  // şirkete geçtiyse tek satırlık sorgu atılıyor.
   let companyKind: 'internal' | 'order_line' = 'internal';
   if (companyId) {
-    const { data: c } = await supabase
-      .from('companies').select('kind').eq('id', companyId).maybeSingle();
-    if ((c as any)?.kind === 'order_line') companyKind = 'order_line';
+    if (companyId === profile.company_id) {
+      if ((profile as any).companies?.kind === 'order_line') companyKind = 'order_line';
+    } else {
+      const { data: c } = await supabase
+        .from('companies').select('kind').eq('id', companyId).maybeSingle();
+      if ((c as any)?.kind === 'order_line') companyKind = 'order_line';
+    }
   }
   const isCustomer = (profile as any).is_customer === true;
+  // Gömülü şirket nesnesi profilde kalmasın: profil başka yerlerde
+  // olduğu gibi forma ve güncellemeye gidiyor, fazladan anahtar sorun olur.
+  delete (profile as any).companies;
 
   return {
     supabase,

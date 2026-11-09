@@ -4,8 +4,10 @@ import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus, Search, ChevronRight, MapPin, Phone, AlertTriangle, X } from 'lucide-react';
-import { createOutlet } from '@/app/(app)/sales/actions';
+import { createOutlet, deleteOutlet } from '@/app/(app)/sales/actions';
 import OutletForm, { type OutletTypeRow } from '@/components/sales/OutletForm';
+import DeleteButton from '@/components/sales/DeleteButton';
+import ListExport from '@/components/sales/ListExport';
 import {
   OUTLET_STATUS_LABEL, OUTLET_STATUS_COLOR, SEGMENT_COLOR,
   type OutletStatus, type Segment
@@ -116,6 +118,19 @@ export default function OutletsClient({ outlets, types }: { outlets: Row[]; type
 
   const onName = useCallback((v: string) => setName(v), []);
 
+  const exportCols = useMemo(() => [
+    { key: 'ad', label: 'Nokta', get: (o: Row) => o.name },
+    { key: 'kod', label: 'Kod', get: (o: Row) => o.code ?? '' },
+    { key: 'ilce', label: 'İlçe', get: (o: Row) => o.district ?? '' },
+    { key: 'sehir', label: 'Şehir', get: (o: Row) => o.city ?? '' },
+    { key: 'telefon', label: 'Telefon', get: (o: Row) => o.phone ?? '' },
+    { key: 'durum', label: 'Durum', get: (o: Row) => OUTLET_STATUS_LABEL[o.status] },
+    { key: 'segment', label: 'Segment', get: (o: Row) => o.segment ?? '' },
+    { key: 'puan', label: 'Puan %', get: (o: Row) => o.score_pct },
+    { key: 'vergi', label: 'Vergi no', get: (o: Row) => o.tax_number ?? '' },
+    { key: 'songun', label: 'Son ziyaretten beri (gün)', get: (o: Row) => daysSince(o.last_visit_at) }
+  ], []);
+
   function onCreate(fd: FormData) {
     setErr(null);
     start(async () => {
@@ -203,6 +218,10 @@ export default function OutletsClient({ outlets, types }: { outlets: Row[]; type
         </select>
       </div>
 
+      <div className="px-1">
+        <ListExport rows={filtered} cols={exportCols} name="noktalar" />
+      </div>
+
       {filtered.length === 0 && (
         <div className="card p-10 text-center">
           <p className="text-3xl mb-2">🔍</p>
@@ -223,8 +242,9 @@ export default function OutletsClient({ outlets, types }: { outlets: Row[]; type
               const d = daysSince(o.last_visit_at);
               const neglected = isNeglected(o);
               return (
-                <Link key={o.id} href={`/sales/outlets/${o.id}`}
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors">
+                <div key={o.id} className="flex items-center gap-2 pr-2 hover:bg-white/[0.04] transition-colors">
+                <Link href={`/sales/outlets/${o.id}`}
+                  className="flex items-center gap-3 flex-1 min-w-0 px-4 py-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="text-[15px] font-medium truncate">{o.name}</p>
@@ -256,6 +276,10 @@ export default function OutletsClient({ outlets, types }: { outlets: Row[]; type
                   </span>
                   <ChevronRight size={15} className="text-[#C7C7CC] shrink-0" />
                 </Link>
+                <DeleteButton
+                  message={`${o.name} silinecek. Ziyaret, teklif veya siparişi varsa silinmez — pasife alınır.`}
+                  action={r => deleteOutlet(o.id, r)} />
+                </div>
               );
             })}
           </div>

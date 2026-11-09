@@ -5,6 +5,8 @@ import { fmtDate } from '@/lib/utils';
 import {
   OUTCOME_LABEL, OUTCOME_COLOR, VISIT_TYPE_LABEL, AUTHORITY_LABEL, VERDICT_LABEL
 } from '@/lib/sales-types';
+import PrintButton from '@/components/sales/PrintButton';
+import { VisitDeleteButton } from '@/components/sales/DocDeleteButtons';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +38,20 @@ export default async function VisitDetail({ params }: { params: { id: string } }
     id ? (reasons ?? []).find((r: any) => r.id === id)?.label ?? '—' : null;
 
   return (
-    <main className="py-5 space-y-5">
+    <main id="print-area" className="py-5 space-y-5">
+      {/* Ziyaret kartı çıktısı: müdür görüşmesine kâğıtla girilebiliyor */}
+      <div className="flex flex-wrap gap-2 px-1" data-noprint>
+        <PrintButton label="Ziyareti yazdır" />
+        <Link href={`/sales/outlets/${visit.outlets?.id}`} className="btn-ghost text-sm">
+          Nokta kartı
+        </Link>
+        <VisitDeleteButton
+          visitId={visit.id}
+          label={`${visit.outlets?.name ?? 'Nokta'} · ${fmtDate(visit.visit_date)}`}
+          draft={visit.status === 'taslak'}
+        />
+      </div>
+
       <header className="card p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">

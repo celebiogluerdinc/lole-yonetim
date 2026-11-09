@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
+import { deleteMessage, logDeletion } from '@/lib/sales-delete';
 
 /**
  * TİCARET — server action'ları (Faz 2)
@@ -19,6 +20,12 @@ async function salesCtx() {
   const ctx = await getCtx();
   if (ctx.isCustomer) throw new Error('Bu bölüme erişiminiz yok.');
   return ctx;
+}
+
+/** Silme yetkisi: admin ve departman müdürü (veritabanı da aynı kuralı uyguluyor). */
+function canDelete(ctx: Awaited<ReturnType<typeof salesCtx>>): boolean {
+  return ['super_admin', 'admin'].includes(ctx.profile.role)
+    || ctx.managedDepartmentIds.length > 0;
 }
 
 /** Postgres hatalarını kullanıcıya gösterilebilir Türkçeye çevirir. */
@@ -48,19 +55,15 @@ export async function fetchOutletPrices(outletId: string) {
   const { supabase, companyId } = await salesCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
-  const { data: products } = await supabase.from('products')
-    .select('id').eq('company_id', companyId).eq('is_active', true).order('sort_order');
-
-  const ids = (products ?? []).map((p: any) => p.id as string);
-  const results = await Promise.all(
-    ids.map(pid => supabase.rpc('fn_price_for', { oid: outletId, pid }))
-  );
+  // Tek çağrı: önceden her ürün için ayrı fn_price_for çalışıyordu
+  // (dört ürün = dört ayrı HTTP isteği, formu açmak gözle görülür yavaştı).
+  const { data, error } = await supabase.rpc('fn_prices_for_outlet', { oid: outletId });
+  if (error) return { error: error.message };
 
   const prices: Record<string, number | null> = {};
-  ids.forEach((pid, idx) => {
-    const v = results[idx]?.data;
-    prices[pid] = v === null || v === undefined ? null : Number(v);
-  });
+  for (const row of (data ?? []) as any[]) {
+    prices[row.product_id] = row.price === null || row.price === undefined ? null : Number(row.price);
+  }
   return { ok: true as const, prices };
 }
 
@@ -382,6 +385,182 @@ export async function createOrderFromQuote(formData: FormData) {
   revalidatePath(`/sales/orders/quotes/${quote.id}`);
   revalidatePath(`/sales/outlets/${quote.outlet_id}`);
   return { ok: true as const, id: order.id as string };
+}
+
+/**
+ * TEKLİFSİZ DOĞRUDAN SİPARİŞ (sahada sözlü teklif)
+ *
+ * Saha gerçeği: fiyat sözlü söyleniyor, müşteri "tamam" diyor, sipariş
+ * orada alınıyor. Önce teklif belgesi düzenleyip onaylatmak için ofise
+ * dönmek akışı kırıyordu.
+ *
+ * Burada teklif adımı ATLANMIYOR, otomatikleşiyor: arkada `is_verbal`
+ * işaretli bir teklif kaydı açılıp "kabul" sayılıyor, sipariş ona
+ * bağlanıyor. Sebebi fiyatın, KDV'nin ve fiyat listesi sürümünün bir
+ * yerde durma zorunluluğu — yoksa sipariş, hangi fiyatla verildiği
+ * bilinmeyen bir kayıt olur ve F06 denetlenemez.
+ *
+ * Sipariş "onay bekliyor" ile açılıyor: sevk için stok teyidi ve
+ * sipariş kabulü hâlâ gerekiyor; sekmedeki kırmızı rozet bunu gösteriyor.
+ */
+export async function createDirectOrder(formData: FormData) {
+  const s = (k: string) => String(formData.get(k) ?? '').trim();
+
+  const parsed = z.object({
+    outlet_id: uuid,
+    visit_id: uuid.nullable().optional(),
+    verbal_note: z.string().min(3, 'Sözlü onayı kim verdi? Kısaca yazın.').max(500),
+    vat_rate: z.coerce.number().min(0).max(100).default(1),
+    payment_method: z.string().max(160).optional().default('')
+  }).safeParse({
+    outlet_id: s('outlet_id'),
+    visit_id: s('visit_id') || null,
+    verbal_note: s('verbal_note'),
+    vat_rate: s('vat_rate') || '1',
+    payment_method: s('payment_method')
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Form eksik.' };
+  const i = parsed.data;
+
+  const items = readOrderItems(formData);
+  if (!items.length) return { error: 'En az bir ürün için koli adedi girilmelidir.' };
+  if (items.some(r => r.paid_bottles > 0 && r.unit_price <= 0)) {
+    return { error: 'Ücretli satırın fiyatı girilmelidir.' };
+  }
+
+  const { supabase, profile, companyId } = await salesCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const [{ data: list }, { data: outlet }] = await Promise.all([
+    supabase.from('price_lists').select('id, version')
+      .eq('company_id', companyId).eq('is_active', true)
+      .order('valid_from', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('outlets')
+      .select('legal_name, name, tax_office, tax_number, address, phone')
+      .eq('id', i.outlet_id).maybeSingle()
+  ]);
+
+  // 1 · sözlü teklif kaydı — fiyatın ve KDV'nin durduğu yer
+  const { data: quote, error: eq } = await supabase.from('quotes').insert({
+    company_id: companyId,
+    outlet_id: i.outlet_id,
+    visit_id: i.visit_id || null,
+    created_by: profile.id,
+    price_list_id: list?.id ?? null,
+    price_list_version: list?.version ?? null,
+    vat_rate: i.vat_rate,
+    payment_method: i.payment_method || null,
+    is_verbal: true,
+    verbal_note: i.verbal_note,
+    status: 'kabul'
+  }).select('id').single();
+  if (eq) return { error: friendly(eq.message) };
+
+  const { error: eqi } = await supabase.from('quote_items').insert(
+    items.map((r, idx) => ({
+      quote_id: quote.id,
+      product_id: r.product_id,
+      bottles: r.paid_bottles + r.free_bottles,
+      unit_price: r.unit_price,
+      discount: 0,
+      position: idx
+    }))
+  );
+  if (eqi) return { error: `Sözlü teklif kalemleri kaydedilemedi: ${friendly(eqi.message)}` };
+
+  // 2 · sipariş
+  const { data: order, error: eo } = await supabase.from('sales_orders').insert({
+    company_id: companyId,
+    outlet_id: i.outlet_id,
+    quote_id: quote.id,
+    visit_id: i.visit_id || null,
+    created_by: profile.id,
+    customer_approval_date: s('customer_approval_date') || null,
+    invoice_title: outlet?.legal_name || outlet?.name || null,
+    tax_office: outlet?.tax_office ?? null,
+    tax_number: outlet?.tax_number ?? null,
+    payment_method: i.payment_method || null,
+    collection_ref: s('collection_ref') || null,
+    delivery_address: s('delivery_address') || outlet?.address || null,
+    receiver_name: s('receiver_name') || null,
+    receiver_phone: s('receiver_phone') || outlet?.phone || null,
+    delivery_time_window: s('delivery_time_window') || null,
+    delivery_date: s('delivery_date') || null,
+    first_followup_date: s('first_followup_date') || null,
+    first_followup_owner: s('first_followup_owner') || profile.id,
+    status: 'onay_bekliyor'
+  }).select('id').single();
+  if (eo) {
+    // teklif kaydı yalnız kalmasın
+    await supabase.from('quotes').delete().eq('id', quote.id);
+    return { error: friendly(eo.message) };
+  }
+
+  const { error: eoi } = await supabase.from('sales_order_items')
+    .insert(items.map(r => ({ ...r, order_id: order.id })));
+  if (eoi) return { error: `Sipariş kalemleri kaydedilemedi: ${friendly(eoi.message)}` };
+
+  // 3 · ziyaret varsa sonucu "sipariş"e çevrilir
+  if (i.visit_id) {
+    await supabase.from('visits')
+      .update({ sales_order_id: order.id, outcome: 'siparis' }).eq('id', i.visit_id);
+  }
+
+  revalidatePath('/sales/orders');
+  revalidatePath(`/sales/outlets/${i.outlet_id}`);
+  revalidatePath('/sales');
+  return { ok: true as const, id: order.id as string, quoteId: quote.id as string };
+}
+
+/** Teklifi siler. Siparişi olan teklif veritabanı korumasıyla silinmez. */
+export async function deleteQuote(quoteId: string, reason?: string) {
+  if (!uuid.safeParse(quoteId).success) return { error: 'Geçersiz teklif.' };
+  const ctx = await salesCtx();
+  const { supabase, profile, companyId } = ctx;
+
+  const { data: q } = await supabase.from('quotes')
+    .select('id, quote_no, status, created_by, outlet_id').eq('id', quoteId).maybeSingle();
+  if (!q) return { error: 'Teklif bulunamadı.' };
+
+  const own = q.created_by === profile.id && q.status === 'taslak';
+  if (!own && !canDelete(ctx)) {
+    return { error: 'Onaya girmiş teklifi yalnızca admin veya müdür silebilir.' };
+  }
+
+  const { error } = await supabase.from('quotes').delete().eq('id', quoteId);
+  if (error) return { error: deleteMessage(error.message) };
+
+  await logDeletion(supabase, companyId, profile.id, 'quote', quoteId,
+    (q as any).quote_no ?? quoteId.slice(0, 8), reason);
+  revalidatePath('/sales/orders');
+  revalidatePath(`/sales/outlets/${q.outlet_id}`);
+  return { ok: true as const };
+}
+
+/** Siparişi siler. Sevk edilmiş sipariş silinmez — iptal edilir. */
+export async function deleteOrder(orderId: string, reason?: string) {
+  if (!uuid.safeParse(orderId).success) return { error: 'Geçersiz sipariş.' };
+  const ctx = await salesCtx();
+  const { supabase, profile, companyId } = ctx;
+
+  const { data: o } = await supabase.from('sales_orders')
+    .select('id, order_no, status, created_by, outlet_id').eq('id', orderId).maybeSingle();
+  if (!o) return { error: 'Sipariş bulunamadı.' };
+
+  const own = o.created_by === profile.id && o.status === 'taslak';
+  if (!own && !canDelete(ctx)) {
+    return { error: 'Onaya girmiş siparişi yalnızca admin veya müdür silebilir.' };
+  }
+
+  const { error } = await supabase.from('sales_orders').delete().eq('id', orderId);
+  if (error) return { error: deleteMessage(error.message) };
+
+  await logDeletion(supabase, companyId, profile.id, 'order', orderId,
+    (o as any).order_no ?? orderId.slice(0, 8), reason);
+  revalidatePath('/sales/orders');
+  revalidatePath(`/sales/outlets/${o.outlet_id}`);
+  revalidatePath('/sales');
+  return { ok: true as const };
 }
 
 export async function confirmOrderStock(orderId: string) {

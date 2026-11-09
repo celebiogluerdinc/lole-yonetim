@@ -1,5 +1,6 @@
 import { getCtx } from '@/lib/auth';
 import { TZ } from '@/lib/utils';
+import { salesBadges } from '@/lib/sales-badges';
 import DayCockpit from '@/components/sales/DayCockpit';
 
 export const dynamic = 'force-dynamic';
@@ -25,19 +26,16 @@ export default async function SalesPanel() {
   }).split(':').map(Number);
   const serverNowMin = (hh || 0) * 60 + (mm || 0);
 
-  const { data: plan } = await supabase.from('route_plans')
-    .select('id, plan_date, city, district, target_visits, closed_at')
-    .eq('user_id', profile.id).eq('plan_date', today).maybeSingle();
-
+  // Rota ve durakları TEK sorguda: önce planı çekip sonra duraklarını
+  // sormak iki sıralı ağ turu demekti ve "Bugün" ekranı en çok açılan
+  // ekran. Duraklar gömülü geliyor, sıralama altta JS ile yapılıyor.
   const [
-    { data: stops }, { data: visits }, { data: followUps },
-    { data: neglected }, { count: draftCount }, { count: outletCount }
+    { data: plan }, { data: visits }, { data: followUps },
+    { data: neglected }, { count: outletCount }
   ] = await Promise.all([
-    plan
-      ? supabase.from('route_stops')
-          .select('id, planned_time, outlet_id, outlet_label, purpose, status, result_note, position, outlets:outlet_id(id, name, district, segment)')
-          .eq('route_plan_id', plan.id).order('position')
-      : Promise.resolve({ data: [] } as any),
+    supabase.from('route_plans')
+      .select('id, plan_date, city, district, target_visits, closed_at, route_stops(id, planned_time, outlet_id, outlet_label, purpose, status, result_note, position, outlets:outlet_id(id, name, district, segment))')
+      .eq('user_id', profile.id).eq('plan_date', today).maybeSingle(),
     supabase.from('visits')
       .select('id, outcome, overall_score, status, outlets:outlet_id(name)')
       .eq('visit_date', today).eq('user_id', profile.id).order('created_at'),
@@ -53,24 +51,29 @@ export default async function SalesPanel() {
           .order('last_visit_at', { ascending: true, nullsFirst: true })
           .limit(12)
       : Promise.resolve({ data: [] } as any),
-    supabase.from('visits').select('id', { count: 'exact', head: true })
-      .eq('user_id', profile.id).eq('status', 'taslak'),
     companyId
       ? supabase.from('outlets').select('id', { count: 'exact', head: true })
           .eq('company_id', companyId).eq('is_active', true)
       : Promise.resolve({ count: 0 } as any)
   ]);
 
+  // Taslak sayısı kabukta da gösteriliyor; cache() sayesinde burada
+  // ikinci bir sorgu değil, hazır sonuç.
+  const { draftVisits } = await salesBadges(supabase, profile.id, companyId);
+
+  const stops = [...(((plan as any)?.route_stops ?? []) as any[])]
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+
   return (
     <DayCockpit
       today={today}
       serverNowMin={serverNowMin}
       plan={(plan ?? null) as any}
-      stops={(stops ?? []) as any}
+      stops={stops as any}
       visits={(visits ?? []) as any}
       followUps={(followUps ?? []) as any}
       neglected={(neglected ?? []) as any}
-      draftCount={draftCount ?? 0}
+      draftCount={draftVisits}
       outletCount={outletCount ?? 0}
     />
   );

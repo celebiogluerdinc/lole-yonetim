@@ -2,11 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Search, ChevronRight, FileText, Package, AlertTriangle, X } from 'lucide-react';
+import { Plus, Search, ChevronRight, FileText, Package, AlertTriangle, X, Zap } from 'lucide-react';
 import {
   tl, QUOTE_STATUS_LABEL, QUOTE_STATUS_COLOR, ORDER_STATUS_LABEL, ORDER_STATUS_COLOR,
   QUOTE_CLOSED, ORDER_CLOSED, type QuoteStatus, type OrderStatus
 } from '@/lib/commerce-format';
+import { deleteQuote, deleteOrder } from '@/app/(app)/sales/orders/actions';
+import DeleteButton from '@/components/sales/DeleteButton';
+import ListExport from '@/components/sales/ListExport';
 
 /**
  * TEKLİF VE SİPARİŞ LİSTESİ (F05 · F06)
@@ -190,22 +193,51 @@ export default function OrdersClient({
     [orders, of, q]
   );
 
-  const newQuoteHref = outletId
-    ? `/sales/orders/quotes/new?outlet=${outletId}`
-    : '/sales/orders/quotes/new';
+  const suffix = outletId ? `?outlet=${outletId}` : '';
+  const newQuoteHref = `/sales/orders/quotes/new${suffix}`;
+  const directHref = `/sales/orders/direct/new${suffix}`;
+
+  const quoteCols = useMemo(() => [
+    { key: 'no', label: 'Teklif no', get: (x: QuoteRow) => x.quote_no ?? '' },
+    { key: 'nokta', label: 'Nokta', get: (x: QuoteRow) => x.outlets?.name ?? '' },
+    { key: 'ilce', label: 'İlçe', get: (x: QuoteRow) => x.outlets?.district ?? '' },
+    { key: 'durum', label: 'Durum', get: (x: QuoteRow) => QUOTE_STATUS_LABEL[x.status] },
+    { key: 'tutar', label: 'Tutar (KDV dahil)', get: (x: QuoteRow) => x.total_incl_vat },
+    { key: 'gecerli', label: 'Geçerlilik', get: (x: QuoteRow) => x.valid_until ?? '' },
+    { key: 'adim', label: 'Sıradaki adım', get: (x: QuoteRow) => quoteNext(x, todayIso) }
+  ], [todayIso]);
+
+  const orderCols = useMemo(() => [
+    { key: 'no', label: 'Sipariş no', get: (x: OrderRow) => x.order_no ?? '' },
+    { key: 'nokta', label: 'Nokta', get: (x: OrderRow) => x.outlets?.name ?? '' },
+    { key: 'ilce', label: 'İlçe', get: (x: OrderRow) => x.outlets?.district ?? '' },
+    { key: 'durum', label: 'Durum', get: (x: OrderRow) => ORDER_STATUS_LABEL[x.status] },
+    { key: 'tutar', label: 'Tutar', get: (x: OrderRow) => x.total_amount },
+    { key: 'teslim', label: 'Teslim', get: (x: OrderRow) => x.delivery_date ?? '' },
+    { key: 'adim', label: 'Sıradaki adım', get: (x: OrderRow) => orderNext(x) }
+  ], []);
 
   return (
     <main className="py-5 space-y-5">
-      <header className="px-1 flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-[28px] leading-tight font-bold tracking-tight">Teklif &amp; Sipariş</h1>
-          <p className="text-[14px] text-[#8E8E93] truncate">
-            {quotes.length} teklif · {orders.length} sipariş
-          </p>
+      <header className="px-1 space-y-3">
+        <div className="flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-[28px] leading-tight font-bold tracking-tight">Teklif &amp; Sipariş</h1>
+            <p className="text-[14px] text-[#8E8E93] truncate">
+              {quotes.length} teklif · {orders.length} sipariş
+            </p>
+          </div>
         </div>
-        <Link href={newQuoteHref} className="btn-primary shrink-0">
-          <Plus size={16} /> Yeni Teklif
-        </Link>
+        {/* Sahada en sık ihtiyaç duyulan yol birincil düğme: fiyat sözlü
+            verilmiş, müşteri kabul etmiş — teklif belgesi beklemeden sipariş. */}
+        <div className="flex gap-2 flex-wrap">
+          <Link href={directHref} className="btn-primary">
+            <Zap size={16} /> Doğrudan Sipariş
+          </Link>
+          <Link href={newQuoteHref} className="btn-outline">
+            <Plus size={16} /> Yeni Teklif
+          </Link>
+        </div>
       </header>
 
       {/* Nokta kartından gelindiyse kapsam görünür ve tek tıkla kaldırılır. */}
@@ -279,6 +311,13 @@ export default function OrdersClient({
             ))}
       </div>
 
+      {/* Çıktı: ekrandaki filtre neyse o iniyor */}
+      <div className="px-1">
+        {tab === 'quotes'
+          ? <ListExport rows={fQuotes} cols={quoteCols} name="teklifler" />
+          : <ListExport rows={fOrders} cols={orderCols} name="siparisler" />}
+      </div>
+
       <div className="card divide-y divide-white/[0.08] overflow-hidden">
         {tab === 'quotes' ? (
           fQuotes.length === 0 ? (
@@ -288,52 +327,62 @@ export default function OrdersClient({
               && ['onayli', 'sunuldu'].includes(x.status);
             const next = quoteNext(x, todayIso);
             return (
-              <Link key={x.id} href={`/sales/orders/quotes/${x.id}`}
-                className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[15px] font-medium truncate">
-                    {x.quote_no ? `#${x.quote_no} · ` : ''}{x.outlets?.name ?? 'Nokta'}
-                  </p>
-                  <p className="text-[13px] text-[#8E8E93] truncate mt-0.5">
-                    {tl(x.total_incl_vat)}
-                    {x.valid_until ? ` · geçerlilik ${fmtD(x.valid_until)}` : ''}
-                  </p>
-                  {next && (
-                    <p className={`text-[12px] mt-0.5 truncate ${overdue ? 'text-rose-300' : 'text-ios-blue'}`}>
-                      → {next}
+              <div key={x.id} className="flex items-center gap-2 pr-2 hover:bg-white/[0.04] transition-colors">
+                <Link href={`/sales/orders/quotes/${x.id}`}
+                  className="flex items-center gap-3 flex-1 min-w-0 px-4 py-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-medium truncate">
+                      {x.quote_no ? `#${x.quote_no} · ` : ''}{x.outlets?.name ?? 'Nokta'}
                     </p>
-                  )}
-                </div>
-                <span className={`badge shrink-0 ${QUOTE_STATUS_COLOR[x.status]}`}>
-                  {QUOTE_STATUS_LABEL[x.status]}
-                </span>
-                <ChevronRight size={15} className="text-[#C7C7CC] shrink-0" />
-              </Link>
+                    <p className="text-[13px] text-[#8E8E93] truncate mt-0.5">
+                      {tl(x.total_incl_vat)}
+                      {x.valid_until ? ` · geçerlilik ${fmtD(x.valid_until)}` : ''}
+                    </p>
+                    {next && (
+                      <p className={`text-[12px] mt-0.5 truncate ${overdue ? 'text-rose-300' : 'text-ios-blue'}`}>
+                        → {next}
+                      </p>
+                    )}
+                  </div>
+                  <span className={`badge shrink-0 ${QUOTE_STATUS_COLOR[x.status]}`}>
+                    {QUOTE_STATUS_LABEL[x.status]}
+                  </span>
+                  <ChevronRight size={15} className="text-[#C7C7CC] shrink-0" />
+                </Link>
+                <DeleteButton
+                  message={`${x.quote_no ? `#${x.quote_no} ` : ''}${x.outlets?.name ?? 'nokta'} teklifi silinecek. Siparişi varsa silinmez.`}
+                  action={r => deleteQuote(x.id, r)} askReason />
+              </div>
             );
           })
         ) : (
           fOrders.length === 0 ? (
-            <Empty icon="📦" text="Bu filtrede sipariş yok. Sipariş onaylı bir tekliften oluşturulur." />
+            <Empty icon="📦" text="Bu filtrede sipariş yok. Sözlü teklif verildiyse Doğrudan Sipariş'i kullanın." />
           ) : fOrders.map(x => {
             const next = orderNext(x);
             return (
-              <Link key={x.id} href={`/sales/orders/${x.id}`}
-                className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04] transition-colors">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[15px] font-medium truncate">
-                    {x.order_no ? `#${x.order_no} · ` : ''}{x.outlets?.name ?? 'Nokta'}
-                  </p>
-                  <p className="text-[13px] text-[#8E8E93] truncate mt-0.5">
-                    {tl(x.total_amount)}
-                    {x.delivery_date ? ` · teslim ${fmtD(x.delivery_date)}` : ''}
-                  </p>
-                  {next && <p className="text-[12px] text-ios-blue mt-0.5 truncate">→ {next}</p>}
-                </div>
-                <span className={`badge shrink-0 ${ORDER_STATUS_COLOR[x.status]}`}>
-                  {ORDER_STATUS_LABEL[x.status]}
-                </span>
-                <ChevronRight size={15} className="text-[#C7C7CC] shrink-0" />
-              </Link>
+              <div key={x.id} className="flex items-center gap-2 pr-2 hover:bg-white/[0.04] transition-colors">
+                <Link href={`/sales/orders/${x.id}`}
+                  className="flex items-center gap-3 flex-1 min-w-0 px-4 py-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-medium truncate">
+                      {x.order_no ? `#${x.order_no} · ` : ''}{x.outlets?.name ?? 'Nokta'}
+                    </p>
+                    <p className="text-[13px] text-[#8E8E93] truncate mt-0.5">
+                      {tl(x.total_amount)}
+                      {x.delivery_date ? ` · teslim ${fmtD(x.delivery_date)}` : ''}
+                    </p>
+                    {next && <p className="text-[12px] text-ios-blue mt-0.5 truncate">→ {next}</p>}
+                  </div>
+                  <span className={`badge shrink-0 ${ORDER_STATUS_COLOR[x.status]}`}>
+                    {ORDER_STATUS_LABEL[x.status]}
+                  </span>
+                  <ChevronRight size={15} className="text-[#C7C7CC] shrink-0" />
+                </Link>
+                <DeleteButton
+                  message={`${x.order_no ? `#${x.order_no} ` : ''}${x.outlets?.name ?? 'nokta'} siparişi silinecek. Sevk edilmişse silinmez.`}
+                  action={r => deleteOrder(x.id, r)} askReason />
+              </div>
             );
           })
         )}

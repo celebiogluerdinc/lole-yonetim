@@ -4,8 +4,9 @@ import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, ShieldAlert, AlertTriangle, PackageCheck } from 'lucide-react';
-import { createComplaint, updateComplaint } from '@/app/(app)/sales/complaints/actions';
+import { createComplaint, updateComplaint, deleteComplaint } from '@/app/(app)/sales/complaints/actions';
 import ReorderPlanForm from '@/components/sales/ReorderPlanForm';
+import DeleteButton from '@/components/sales/DeleteButton';
 import { fmtDate } from '@/lib/utils';
 
 export const CATEGORY_LABEL: Record<string, string> = {
@@ -318,11 +319,16 @@ export default function ComplaintsClient({
                     </div>
                   </form>
                 ) : (
-                  c.status !== 'cozuldu' && (
-                    <button onClick={() => setEditing(c.id)} className="btn-ghost text-sm">
-                      Sonuçlandır
-                    </button>
-                  )
+                  <div className="flex flex-wrap items-center gap-2">
+                    {c.status !== 'cozuldu' && (
+                      <button onClick={() => setEditing(c.id)} className="btn-ghost text-sm">
+                        Sonuçlandır
+                      </button>
+                    )}
+                    <DeleteButton
+                      message={`${c.outlets?.name ?? 'Nokta'} şikâyet kaydı silinecek. Karantina ve güvenlik sayıları da düşer.`}
+                      action={r => deleteComplaint(c.id, r)} askReason />
+                  </div>
                 )}
               </div>
             ))}

@@ -1,4 +1,5 @@
 import { getCtx } from '@/lib/auth';
+import { salesBadges } from '@/lib/sales-badges';
 import { logout } from '@/app/login/actions';
 import { ROLE_LABEL } from '@/lib/utils';
 import NavLink, { type IconName } from '@/components/NavLink';
@@ -121,20 +122,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       Promise.resolve({ count: 0 } as any), Promise.resolve({ count: 0 } as any),
       Promise.resolve({ count: 0 } as any)
     ]),
-    // saha satış: bana ait açık ve vadesi gelmiş takipler (menü rozeti)
+    // Saha satış rozetleri. /sales kabuğu da aynı sayaçları gösteriyor;
+    // salesBadges React cache() içinde olduğu için sorgu istek başına
+    // bir kez çalışıp iki yere de yetiyor.
     isCustomer
-      ? Promise.resolve({ count: 0 } as any)
-      : supabase.from('follow_ups')
-          .select('id', { count: 'exact', head: true })
-          .eq('owner_user_id', profile.id).eq('status', 'acik')
-          .lte('due_date', new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' }))
+      ? Promise.resolve({ dueFollowUps: 0, draftVisits: 0, pendingOrders: 0 })
+      : salesBadges(supabase, profile.id, companyId)
   ]);
   const appName = appNameRes?.data?.value ?? 'Lole Yönetim';
   let companyName = appName;
   if (companyRes?.data) companyName = companyRes.data.name;
   else if (profile.role === 'super_admin') companyName = 'Tüm Şirketler';
   const unread = unreadCount ?? 0;
-  const salesFollowUps = (salesFupRes as any)?.count ?? 0;
+  // Menüde tek rozet var: bekleyen işin toplamı (takip + bekleyen sipariş).
+  const sb = salesFupRes as { dueFollowUps: number; draftVisits: number; pendingOrders: number };
+  const salesFollowUps = (sb?.dueFollowUps ?? 0) + (sb?.pendingOrders ?? 0);
   const msgUnread = msgUnreadCount ?? 0;
 
   const readSet = new Set((annReadRes?.data ?? []).map((r: any) => r.announcement_id));
