@@ -187,12 +187,15 @@ export async function groupStopsByDistrict(planId: string) {
   const { supabase } = await salesCtx();
 
   const { data: stops, error } = await supabase.from('route_stops')
-    .select('id, planned_time, position, status, outlets:outlet_id(district)')
+    .select('id, planned_time, position, status, district, outlets:outlet_id(district)')
     .eq('route_plan_id', planId);
   if (error) return { error: error.message };
   if (!stops || stops.length < 2) return { error: 'Sıralanacak yeterli durak yok.' };
 
-  const key = (s: any) => (s.outlets?.district ?? '￿').toLocaleLowerCase('tr-TR');
+  // İki kaynak: kayıtlı noktanın ilçesi ya da serbest durağın kendi ilçesi.
+  // İlçesi yazılmamış durak en sona gitsin diye '￿' ile dolduruyoruz.
+  const key = (s: any) =>
+    (s.outlets?.district ?? s.district ?? '￿').toLocaleLowerCase('tr-TR');
   const sorted = [...stops].sort((a: any, b: any) => {
     // önce işi bitmiş duraklar, sonra bekleyenler
     const ad = a.status === 'planlandi' ? 1 : 0;
@@ -259,6 +262,14 @@ export async function createRoutePlan(formData: FormData) {
   return { ok: true, id: data.id as string, target };
 }
 
+/**
+ * Durak ekler. Kayıtlı nokta ZORUNLU DEĞİL.
+ *
+ * Rotanın amacı yalnız mevcut müşteriyi gezmek değil, yeni nokta bulmak.
+ * Kartotekte olmayan bir yer ("sanayi sitesi karşısındaki kebapçı")
+ * doğrudan adıyla yazılabiliyor; şehir ve ilçe durağın kendi
+ * sütunlarında duruyor ki ilçeye göre sıralamaya girsin.
+ */
 export async function addRouteStop(formData: FormData) {
   const s = (k: string) => String(formData.get(k) ?? '').trim();
   const planId = s('route_plan_id');
@@ -266,10 +277,23 @@ export async function addRouteStop(formData: FormData) {
 
   const outletId = s('outlet_id');
   const label = s('outlet_label');
-  if (!outletId && !label) return { error: 'Nokta seçin veya adını yazın.' };
+  if (!outletId && label.length < 2) {
+    return { error: 'Durak adı yazın (kartotekte kayıtlı nokta seçmek zorunlu değil).' };
+  }
 
   const { supabase, companyId } = await salesCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  // Serbest durak için konumu durağın kendisi taşıyor; rota planında
+  // şehir varsa ve durakta yazılmadıysa oradan devralıyor.
+  let city = s('city') || null;
+  let district = s('district') || null;
+  if (!outletId && !city) {
+    const { data: p } = await supabase.from('route_plans')
+      .select('city, district').eq('id', planId).maybeSingle();
+    city = p?.city ?? null;
+    if (!district) district = p?.district ?? null;
+  }
 
   const { count } = await supabase.from('route_stops')
     .select('id', { count: 'exact', head: true }).eq('route_plan_id', planId);
@@ -280,6 +304,8 @@ export async function addRouteStop(formData: FormData) {
     planned_time: s('planned_time') || null,
     outlet_id: outletId || null,
     outlet_label: outletId ? null : label,
+    city: outletId ? null : city,
+    district: outletId ? null : district,
     purpose: s('purpose') || null,
     contact_person: s('contact_person') || null,
     position: count ?? 0
@@ -287,7 +313,66 @@ export async function addRouteStop(formData: FormData) {
   if (error) return { error: error.message };
 
   revalidatePath('/sales/routes');
+  revalidatePath('/sales');
   return { ok: true };
+}
+
+/**
+ * Serbest durağı kartoteğe geçirir ve durağa bağlar.
+ *
+ * Gerekçe: ziyaret kaydı nokta istiyor. Potansiyel müşteriye gidilip
+ * görüşüldüyse o yer artık bir aday noktadır; her gün yeniden elle
+ * yazılması hem zaman kaybı hem de mükerrer kayıt üretir.
+ *
+ * Nokta "aday" statüsünde açılıyor; tip ve fatura bilgileri nokta
+ * kartından tamamlanıyor — sahada durağı dönüştürmek tek tık olsun.
+ */
+export async function convertStopToOutlet(stopId: string) {
+  if (!uuid.safeParse(stopId).success) return { error: 'Geçersiz durak.' };
+  const { supabase, profile, companyId } = await salesCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const { data: stop } = await supabase.from('route_stops')
+    .select('id, outlet_id, outlet_label, city, district, contact_person')
+    .eq('id', stopId).maybeSingle();
+  if (!stop) return { error: 'Durak bulunamadı.' };
+  if (stop.outlet_id) return { error: 'Bu durak zaten kayıtlı bir noktaya bağlı.' };
+
+  const name = (stop.outlet_label ?? '').trim();
+  if (name.length < 2) return { error: 'Durağın adı yazılmamış.' };
+
+  // Aynı ilçede aynı adla nokta varsa yeni kayıt açmıyoruz, mevcuda bağlıyoruz —
+  // mükerrer kartoteks en sinsi veri sorunu.
+  const { data: dupe } = await supabase.from('outlets')
+    .select('id, district').eq('company_id', companyId).ilike('name', name).limit(1).maybeSingle();
+
+  let outletId: string;
+  let reused = false;
+  if (dupe && (dupe.district ?? '') === (stop.district ?? '')) {
+    outletId = dupe.id as string;
+    reused = true;
+  } else {
+    const { data: created, error } = await supabase.from('outlets').insert({
+      company_id: companyId,
+      name,
+      city: stop.city || null,
+      district: stop.district || null,
+      status: 'aday',
+      assigned_user_id: profile.id,
+      created_by: profile.id
+    }).select('id').single();
+    if (error) return { error: error.message };
+    outletId = created.id as string;
+  }
+
+  const { error: e2 } = await supabase.from('route_stops')
+    .update({ outlet_id: outletId }).eq('id', stopId);
+  if (e2) return { error: e2.message };
+
+  revalidatePath('/sales/routes');
+  revalidatePath('/sales/outlets');
+  revalidatePath('/sales');
+  return { ok: true as const, id: outletId, reused };
 }
 
 /** Durağın sonucunu işaretler. Ertelenen/iptal için neden zorunlu. */

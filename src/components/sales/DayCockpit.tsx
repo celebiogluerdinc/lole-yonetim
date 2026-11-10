@@ -38,6 +38,8 @@ interface Plan {
 interface Stop {
   id: string; planned_time: string | null; outlet_id: string | null;
   outlet_label: string | null; purpose: string | null;
+  /** Serbest (potansiyel) durağın kendi konumu */
+  city?: string | null; district?: string | null;
   status: 'planlandi' | 'gerceklesti' | 'ertelendi' | 'iptal';
   result_note: string | null; position: number;
   outlets: { id: string; name: string; district: string | null; segment: string | null } | null;
@@ -194,12 +196,15 @@ export default function DayCockpit({
         sub: [
           m !== null ? (late ? `${minToStr(m)} · gecikti` : `${minToStr(m)} planlı`) : 'saat verilmedi',
           nextStop.purpose,
-          nextStop.outlets?.district
+          nextStop.outlets?.district ?? nextStop.district,
+          nextStop.outlet_id ? null : 'potansiyel'
         ].filter(Boolean).join(' · '),
+        // Potansiyel durakta nokta kaydı yok: temsilci Rota ekranından
+        // "Nokta olarak kaydet" diyip ziyareti oradan açıyor.
         href: nextStop.outlet_id
           ? `/sales/visits/new?outlet=${nextStop.outlet_id}`
-          : '/sales/visits/new',
-        cta: 'Ziyareti aç',
+          : '/sales/routes',
+        cta: nextStop.outlet_id ? 'Ziyareti aç' : 'Rotada aç',
         tone: late ? 'warn' : undefined
       };
     }
@@ -243,7 +248,8 @@ export default function DayCockpit({
       if (bm !== null) return 1;
       return a.position - b.position;
     })) {
-      const k = s.outlets?.district || 'İlçe belirtilmedi';
+      // Serbest (potansiyel) durak kendi ilçesini taşıyor
+      const k = s.outlets?.district || s.district || 'İlçe belirtilmedi';
       map.set(k, [...(map.get(k) ?? []), s]);
     }
     return Array.from(map.entries());
@@ -434,12 +440,20 @@ export default function DayCockpit({
                       {s.status === 'ertelendi' && (
                         <Clock size={16} className="text-amber-400 shrink-0" />
                       )}
-                      {s.status === 'planlandi' && s.outlet_id && (
-                        <Link href={`/sales/visits/new?outlet=${s.outlet_id}`}
-                          className={`rounded-lg px-2.5 py-1.5 text-[12px] font-semibold shrink-0 ${
-                            late ? 'bg-ios-red text-white' : 'bg-ios-blue/15 text-ios-blue'}`}>
-                          {late ? 'Gecikti · aç' : 'Ziyareti aç'}
-                        </Link>
+                      {s.status === 'planlandi' && (
+                        s.outlet_id ? (
+                          <Link href={`/sales/visits/new?outlet=${s.outlet_id}`}
+                            className={`rounded-lg px-2.5 py-1.5 text-[12px] font-semibold shrink-0 ${
+                              late ? 'bg-ios-red text-white' : 'bg-ios-blue/15 text-ios-blue'}`}>
+                            {late ? 'Gecikti · aç' : 'Ziyareti aç'}
+                          </Link>
+                        ) : (
+                          /* Potansiyel durak: nokta kaydı Rota ekranında açılıyor */
+                          <Link href="/sales/routes"
+                            className="rounded-lg px-2.5 py-1.5 text-[12px] font-semibold shrink-0 bg-amber-500/15 text-amber-300">
+                            Potansiyel
+                          </Link>
+                        )
                       )}
                     </div>
                   );

@@ -34,7 +34,7 @@ export default async function SalesPanel() {
     { data: neglected }, { count: outletCount }
   ] = await Promise.all([
     supabase.from('route_plans')
-      .select('id, plan_date, city, district, target_visits, closed_at, route_stops(id, planned_time, outlet_id, outlet_label, purpose, status, result_note, position, outlets:outlet_id(id, name, district, segment))')
+      .select('id, plan_date, city, district, target_visits, closed_at, route_stops(id, planned_time, outlet_id, outlet_label, city, district, purpose, status, result_note, position, outlets:outlet_id(id, name, district, segment))')
       .eq('user_id', profile.id).eq('plan_date', today).maybeSingle(),
     supabase.from('visits')
       .select('id, outcome, overall_score, status, outlets:outlet_id(name)')
