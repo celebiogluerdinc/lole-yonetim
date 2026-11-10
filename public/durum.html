@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sunucu durumu — Lole Yönetim</title>
+<!--
+  TEK SAYFALIK DURUM TESTİ
+
+  Uygulamanın kendisi açılmasa da bu sayfa açılır: statik dosya, sunucu
+  fonksiyonu ve veritabanı gerektirmiyor. Katman katman nerede koptuğunu
+  gösteriyor:
+    ping.txt  → CDN/statik katman (Vercel ayakta mı)
+    /login    → sunucu fonksiyonu (Next.js çalışıyor mu)
+    /api/health veya /login yanıt kodu → veritabanı/çevre değişkenleri
+
+  Bu sayfa açılıp ping.txt başarılıysa sorun ağda DEĞİL.
+-->
+<style>
+  body { margin:0; min-height:100dvh; display:flex; align-items:center; justify-content:center;
+    background:#F4F6FA; color:#10151F; font-family:-apple-system,'Segoe UI',Arial,sans-serif; }
+  .card { background:#fff; border-radius:24px; box-shadow:0 10px 40px -12px rgba(16,21,31,.18);
+    padding:28px 24px; max-width:420px; width:100%; margin:20px; }
+  h1 { font-size:18px; margin:0 0 4px; } p.sub { font-size:13px; color:#667085; margin:0 0 18px; }
+  ul { list-style:none; padding:0; margin:0; font-size:13.5px; }
+  li { display:flex; gap:10px; align-items:center; padding:10px 0; border-top:1px solid #EEF1F6; }
+  .dot { width:9px;height:9px;border-radius:50%;background:#D0D5DD;flex:0 0 auto; }
+  .ok{background:#12B76A}.bad{background:#F04438}.wait{background:#F79009}
+  .val { margin-left:auto; color:#667085; font-size:12.5px; text-align:right; }
+  pre { background:#F7F8FA;border:1px solid #EEF1F6;border-radius:12px;padding:10px;
+    font-size:11px;line-height:1.5;color:#475467;white-space:pre-wrap;word-break:break-all;margin:16px 0 0; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Lole Yönetim — sunucu durumu</h1>
+    <p class="sub">Bu sayfa açıldıysa adrese ulaşılıyor demektir. Aşağıdaki satırlar hangi katmanda koptuğunu gösterir.</p>
+    <ul id="list"></ul>
+    <pre id="out">çalışıyor…</pre>
+  </div>
+<script>
+var tests = [
+  { k:'statik', label:'Statik dosya (CDN)', url:'/ping.txt' },
+  { k:'sunucu', label:'Sunucu / Next.js', url:'/login' },
+  { k:'anasayfa', label:'Uygulama ana sayfası', url:'/' }
+];
+var list = document.getElementById('list'), out = document.getElementById('out'), log = [];
+function timed(u, ms) {
+  return new Promise(function (res, rej) {
+    var d=false, t=setTimeout(function(){ if(!d){ d=true; rej(new Error('zaman aşımı '+ms+'ms')); } }, ms);
+    fetch(u,{cache:'no-store',redirect:'follow'}).then(function(r){if(!d){d=true;clearTimeout(t);res(r);}})
+      .catch(function(e){if(!d){d=true;clearTimeout(t);rej(e);}});
+  });
+}
+tests.forEach(function (t) {
+  var li=document.createElement('li');
+  li.innerHTML='<span class="dot wait"></span>'+t.label+'<span class="val">deneniyor…</span>';
+  list.appendChild(li);
+  var started=Date.now();
+  timed(t.url+(t.url.indexOf('?')>-1?'&':'?')+'t='+Date.now(), 12000).then(function(r){
+    var ms=Date.now()-started;
+    li.querySelector('.dot').className='dot '+(r.ok?'ok':'bad');
+    li.querySelector('.val').textContent='HTTP '+r.status+' · '+ms+'ms';
+    log.push(t.label+': HTTP '+r.status+' ('+ms+'ms)');
+    out.textContent=log.join('\n');
+  }).catch(function(e){
+    var ms=Date.now()-started;
+    li.querySelector('.dot').className='dot bad';
+    li.querySelector('.val').textContent='yanıt yok · '+ms+'ms';
+    log.push(t.label+': YANIT YOK — '+e.message+' ('+ms+'ms)');
+    out.textContent=log.join('\n');
+  });
+});
+</script>
+</body>
+</html>

@@ -3,25 +3,179 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Çevrimdışı — Lole Yönetim</title>
+<title>Bağlantı sorunu — Lole Yönetim</title>
+<!--
+  TEŞHİS EKRANI
+
+  Eski hâli her başarısız istekte "İnternet bağlantısı yok" diyordu. Oysa
+  service worker bu sayfayı, tarayıcı sunucudan HİÇBİR yanıt alamadığında
+  gösteriyor; internet varken sunucuya ulaşılamadığında da aynı metin
+  çıkıyordu ve sorunun nerede olduğu anlaşılmıyordu.
+
+  Bu sayfa artık kendisi üç test yapıyor:
+    1. navigator.onLine  — cihazın ağ durumu
+    2. /ping.txt         — uygulamanın sunucusu ayakta mı (veritabanı
+                           gerekmeyen, statik dosya; CDN'den gelir)
+    3. harici 204 isteği — internetin kendisi çalışıyor mu
+  Sonuca göre tek cümlelik gerçek sebebi yazıyor ve teknik ayrıntıyı
+  kopyalanabilir biçimde gösteriyor.
+-->
 <style>
+  :root { color-scheme: light; }
   body { margin: 0; min-height: 100dvh; display: flex; align-items: center; justify-content: center;
-    background: #F4F6FA; color: #10151F; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; }
-  .card { background: #FFFFFF; border: 1px solid rgba(255,255,255,0.1); border-radius: 24px;
-    padding: 40px 32px; text-align: center; max-width: 320px; margin: 24px; }
-  .emoji { font-size: 42px; margin-bottom: 12px; }
-  h1 { font-size: 18px; margin: 0 0 6px; }
-  p { font-size: 14px; color: #667085; margin: 0 0 20px; line-height: 1.5; }
-  button { width: 100%; border: 0; border-radius: 16px; padding: 12px; font-size: 15px; font-weight: 600;
+    background: #F4F6FA; color: #10151F;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; }
+  .card { background: #fff; border-radius: 24px; box-shadow: 0 10px 40px -12px rgba(16,21,31,0.18);
+    padding: 32px 28px; max-width: 380px; margin: 20px; width: 100%; }
+  .emoji { font-size: 40px; text-align: center; margin-bottom: 10px; }
+  h1 { font-size: 19px; margin: 0 0 8px; text-align: center; }
+  .lead { font-size: 14px; color: #475467; margin: 0 0 18px; line-height: 1.55; text-align: center; }
+  .checks { list-style: none; padding: 0; margin: 0 0 18px; font-size: 13.5px; }
+  .checks li { display: flex; align-items: center; gap: 10px; padding: 9px 0;
+    border-top: 1px solid #EEF1F6; color: #344054; }
+  .checks li:last-child { border-bottom: 1px solid #EEF1F6; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #D0D5DD; flex: 0 0 auto; }
+  .dot.ok { background: #12B76A; } .dot.bad { background: #F04438; } .dot.wait { background: #F79009; }
+  .val { margin-left: auto; color: #667085; font-size: 12.5px; }
+  .fix { background: #F0F6FF; border: 1px solid #CFE2FF; border-radius: 14px;
+    padding: 12px 14px; font-size: 13.5px; line-height: 1.55; color: #10151F; margin: 0 0 16px; }
+  .fix b { display: block; margin-bottom: 3px; }
+  button { width: 100%; border: 0; border-radius: 16px; padding: 13px; font-size: 15px; font-weight: 600;
     color: #fff; background: linear-gradient(180deg, #2E86FF, #0A6CFF); cursor: pointer; }
+  .ghost { background: none; color: #475467; font-weight: 500; font-size: 13px; padding: 10px 0 0; }
+  pre { background: #F7F8FA; border: 1px solid #EEF1F6; border-radius: 12px; padding: 10px;
+    font-size: 11px; line-height: 1.5; color: #475467; overflow-x: auto; margin: 12px 0 0;
+    white-space: pre-wrap; word-break: break-all; display: none; }
 </style>
 </head>
 <body>
   <div class="card">
-    <div class="emoji">📡</div>
-    <h1>İnternet bağlantısı yok</h1>
-    <p>Lole Yönetim'e ulaşılamıyor. Bağlantınızı kontrol edip tekrar deneyin.</p>
+    <div class="emoji" id="emoji">📡</div>
+    <h1 id="title">Bağlantı kontrol ediliyor…</h1>
+    <p class="lead" id="lead">Sorunun nerede olduğunu birkaç saniyede buluyoruz.</p>
+
+    <ul class="checks">
+      <li><span class="dot" id="d1"></span> Cihazın ağ durumu <span class="val" id="v1">—</span></li>
+      <li><span class="dot" id="d2"></span> İnternet erişimi <span class="val" id="v2">—</span></li>
+      <li><span class="dot" id="d3"></span> Lole Yönetim sunucusu <span class="val" id="v3">—</span></li>
+    </ul>
+
+    <div class="fix" id="fix" style="display:none"></div>
+
     <button onclick="location.reload()">Tekrar Dene</button>
+    <button class="ghost" id="copy" type="button">Teknik ayrıntıyı kopyala</button>
+    <pre id="detail"></pre>
   </div>
+
+<script>
+(function () {
+  var qs = function (id) { return document.getElementById(id); };
+  var set = function (n, state, text) {
+    qs('d' + n).className = 'dot ' + state;
+    qs('v' + n).textContent = text;
+  };
+
+  // Service worker, isteğin neden başarısız olduğunu buraya enjekte ediyor
+  var swErr = window.__lole_err || null;
+  var swUrl = window.__lole_url || location.href;
+
+  var result = { online: null, internet: null, server: null, serverStatus: null, serverErr: null };
+
+  // 1 · cihazın kendi ağ durumu
+  result.online = navigator.onLine !== false;
+  set(1, result.online ? 'ok' : 'bad', result.online ? 'bağlı' : 'bağlı değil');
+
+  // zaman aşımlı fetch: takılı kalan istek teşhisi kilitlemesin
+  function timed(url, opts, ms) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var t = setTimeout(function () {
+        if (!done) { done = true; reject(new Error('zaman aşımı (' + ms + ' ms)')); }
+      }, ms);
+      fetch(url, opts).then(function (r) {
+        if (done) return; done = true; clearTimeout(t); resolve(r);
+      }).catch(function (e) {
+        if (done) return; done = true; clearTimeout(t); reject(e);
+      });
+    });
+  }
+
+  // 2 · internetin kendisi (uygulamadan bağımsız, opak yanıt yeter)
+  var internet = timed('https://www.gstatic.com/generate_204',
+    { mode: 'no-cors', cache: 'no-store' }, 6000)
+    .then(function () { result.internet = true; set(2, 'ok', 'çalışıyor'); })
+    .catch(function (e) { result.internet = false; set(2, 'bad', 'erişilemiyor'); result.internetErr = String(e); });
+
+  // 3 · uygulamanın sunucusu — ping.txt statik dosya, veritabanı gerekmiyor
+  var server = timed('/ping.txt?t=' + Date.now(), { cache: 'no-store' }, 8000)
+    .then(function (r) {
+      result.serverStatus = r.status;
+      result.server = r.ok;
+      set(3, r.ok ? 'ok' : 'bad', r.ok ? 'ayakta' : 'HTTP ' + r.status);
+    })
+    .catch(function (e) {
+      result.server = false; result.serverErr = String(e);
+      set(3, 'bad', 'ulaşılamıyor');
+    });
+
+  set(2, 'wait', 'deneniyor…'); set(3, 'wait', 'deneniyor…');
+
+  Promise.all([internet, server]).then(function () {
+    var emoji = qs('emoji'), title = qs('title'), lead = qs('lead'), fix = qs('fix');
+
+    if (!result.online || result.internet === false) {
+      emoji.textContent = '📡';
+      title.textContent = 'İnternet bağlantısı yok';
+      lead.textContent = 'Cihaz internete çıkamıyor. Wi-Fi veya mobil veriyi kontrol edip tekrar deneyin.';
+    } else if (result.server === true) {
+      emoji.textContent = '🔁';
+      title.textContent = 'Geçici bir kesinti';
+      lead.textContent = 'Sunucu şu an yanıt veriyor. İlk istek zaman aşımına uğramış olabilir; tekrar deneyin.';
+    } else if (result.serverStatus) {
+      emoji.textContent = '🛠️';
+      title.textContent = 'Sunucu hata veriyor';
+      lead.textContent = 'İnternetiniz çalışıyor ama uygulama HTTP ' + result.serverStatus + ' döndürüyor.';
+      fix.style.display = 'block';
+      fix.innerHTML = '<b>Yöneticiye:</b> Vercel panelinde son dağıtımın durumuna ve Supabase projesinin ' +
+        'duraklatılmış (Paused) olup olmadığına bakın.';
+    } else {
+      emoji.textContent = '🚧';
+      title.textContent = 'Uygulama sunucusuna ulaşılamıyor';
+      lead.textContent = 'İnternetiniz çalışıyor; sorun sizin bağlantınızda değil. ' +
+        'Tarayıcı uygulamanın adresinden hiçbir yanıt alamıyor.';
+      fix.style.display = 'block';
+      fix.innerHTML =
+        '<b>Sırayla deneyin</b>' +
+        '1. Wi-Fi\'ı kapatıp mobil veriyle açın. Çalışıyorsa Wi-Fi ağının DNS\'i bu adresi çözemiyor: ' +
+        'modemde DNS\'i 1.1.1.1 ve 8.8.8.8 yapın.<br>' +
+        '2. Mobil veride de açılmıyorsa Vercel dağıtımı ve alan adı bağlantısını kontrol edin.';
+    }
+
+    var detail = [
+      'Lole Yönetim — bağlantı teşhisi',
+      'Zaman: ' + new Date().toISOString(),
+      'Adres: ' + swUrl,
+      'navigator.onLine: ' + result.online,
+      'İnternet testi: ' + (result.internet === true ? 'başarılı' : 'başarısız — ' + (result.internetErr || '')),
+      'Sunucu (/ping.txt): ' + (result.server === true ? 'HTTP ' + result.serverStatus
+        : (result.serverStatus ? 'HTTP ' + result.serverStatus : 'yanıt yok — ' + (result.serverErr || ''))),
+      'Service worker hatası: ' + (swErr || '—'),
+      'Tarayıcı: ' + navigator.userAgent
+    ].join('\n');
+
+    qs('detail').textContent = detail;
+    qs('copy').onclick = function () {
+      qs('detail').style.display = 'block';
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(detail).then(function () {
+          qs('copy').textContent = 'Kopyalandı';
+        }).catch(function () { qs('copy').textContent = 'Aşağıdaki metni kopyalayın'; });
+      } else {
+        qs('copy').textContent = 'Aşağıdaki metni kopyalayın';
+      }
+    };
+  });
+})();
+</script>
 </body>
 </html>
