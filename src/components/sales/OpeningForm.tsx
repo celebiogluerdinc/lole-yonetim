@@ -144,7 +144,7 @@ export default function OpeningForm({
                 onClick={() => setResult(v)}
                 className={`rounded-lg px-3.5 py-2 text-[13px] font-semibold transition-colors ${
                   result === v ? 'bg-ios-blue text-white'
-                  : disabled ? 'bg-white/[0.04] text-[#48484A] cursor-not-allowed'
+                  : disabled ? 'bg-white/[0.04] text-[#AEAEB2] cursor-not-allowed'
                   : 'bg-white/[0.07] text-[#D1D1D6]'
                 }`}>
                 {l}

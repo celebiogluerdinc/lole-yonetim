@@ -19,7 +19,7 @@ interface Usage {
 const MIN_N = 30;
 
 /** Kategorik seri renkleri — erişilebilirlik için doğrulanmış sabit sıra. */
-const SERIES = ['#3987e5', '#d95926', '#199e70', '#c98500'];
+const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'];
 
 export default function ProductTaste({
   products, tastings, summaries, usage
@@ -243,8 +243,8 @@ export default function ProductTaste({
                 </span>
               </div>
               <div className="h-2 rounded-full bg-white/[0.08] overflow-hidden flex">
-                <div className="h-full bg-[#d95926]" style={{ width: `${(u.opened / maxUsage) * 100}%` }} />
-                <div className="h-full bg-[#3987e5]" style={{ width: `${(u.left / maxUsage) * 100}%` }} />
+                <div className="h-full bg-[#eb6834]" style={{ width: `${(u.opened / maxUsage) * 100}%` }} />
+                <div className="h-full bg-[#2a78d6]" style={{ width: `${(u.left / maxUsage) * 100}%` }} />
               </div>
             </div>
           ))}
@@ -252,10 +252,10 @@ export default function ProductTaste({
           {usageByProduct.length > 0 && (
             <div className="flex gap-4 text-[12px] text-[#8E8E93] pt-1">
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-2 rounded-sm bg-[#d95926] inline-block" /> açılan şişe
+                <span className="w-3 h-2 rounded-sm bg-[#eb6834] inline-block" /> açılan şişe
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-2 rounded-sm bg-[#3987e5] inline-block" /> bırakılan kapalı
+                <span className="w-3 h-2 rounded-sm bg-[#2a78d6] inline-block" /> bırakılan kapalı
               </span>
             </div>
           )}

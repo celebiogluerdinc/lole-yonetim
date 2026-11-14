@@ -1,9 +1,17 @@
 import { getCtx } from '@/lib/auth';
 import { TZ } from '@/lib/utils';
-import VisitForm from '@/components/sales/VisitForm';
+import VisitQuickForm from '@/components/sales/VisitQuickForm';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Yeni ziyaret — tek sayfa.
+ *
+ * Beş adımlı sihirbaz kaldırıldı: sahada adımlar arasında gezinmek
+ * 30 saniyelik işi dakikalara çıkarıyordu. Aynı form nokta kartının
+ * içinde de açılıyor (OutletWorkspace), bu sayfa doğrudan bağlantıyla
+ * gelenler için duruyor.
+ */
 export default async function NewVisitPage({
   searchParams
 }: { searchParams: { outlet?: string } }) {
@@ -31,7 +39,6 @@ export default async function NewVisitPage({
       ? supabase.from('profiles').select('id, full_name')
           .eq('company_id', companyId).eq('is_active', true).order('full_name')
       : Promise.resolve({ data: [] } as any),
-    // ziyarete bağlanabilecek siparişler (henüz başka ziyarete bağlanmamış olanlar da dâhil)
     companyId
       ? supabase.from('sales_orders')
           .select('id, order_no, total_amount, outlet_id')
@@ -45,15 +52,15 @@ export default async function NewVisitPage({
   const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
 
   return (
-    <VisitForm
+    <VisitQuickForm
       outlets={(outlets ?? []) as any}
       products={(products ?? []) as any}
       criteria={(criteria ?? []) as any}
       reasons={(reasons ?? []) as any}
       people={(people ?? []) as any}
+      orders={(orders ?? []) as any}
       preselectedOutlet={searchParams.outlet}
       today={today}
-      orders={(orders ?? []) as any}
     />
   );
 }

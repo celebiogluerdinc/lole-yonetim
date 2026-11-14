@@ -47,7 +47,7 @@ export default function OutletDangerZone({
           size="md"
         />
       </div>
-      <p className="text-[12px] text-[#6E6E73]">
+      <p className="text-[12px] text-[#8E8E93]">
         Pasif nokta listelerde ve rotada çıkmaz; geçmiş ziyaret ve raporlar korunur.
       </p>
       {err && <p className="text-[12px] text-ios-red">{err}</p>}

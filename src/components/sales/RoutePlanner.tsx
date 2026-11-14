@@ -378,20 +378,30 @@ export default function RoutePlanner({
               {!closed && s.status === 'planlandi' && (
                 <div className="flex flex-wrap gap-1.5 pl-[3.75rem]">
                   {s.outlet_id ? (
-                    <Link href={`/sales/visits/new?outlet=${s.outlet_id}`}
-                      className="rounded-lg bg-ios-blue text-white px-3 py-2 text-[13px] font-semibold">
-                      Ziyareti aç
+                    <Link href={`/sales/outlets/${s.outlet_id}`}
+                      className="min-h-[44px] inline-flex items-center rounded-lg bg-ios-blue text-white px-3 py-2 text-[13px] font-semibold">
+                      Noktayı aç
                     </Link>
                   ) : (
                     /* Ziyaret kaydı nokta istiyor: görüşüldüyse durak tek
                        tıkla aday noktaya dönüşüyor, sonra ziyaret açılıyor. */
-                    <button onClick={() => run(() => convertStopToOutlet(s.id))} disabled={pending}
-                      className="rounded-lg bg-ios-blue text-white px-3 py-2 text-[13px] font-semibold flex items-center gap-1">
-                      <Plus size={14} /> Nokta olarak kaydet
+                    <button disabled={pending}
+                      onClick={() => {
+                        setErr(null);
+                        start(async () => {
+                          const r: any = await convertStopToOutlet(s.id);
+                          if (r?.error) { setErr(r.error); return; }
+                          // Kartı hemen aç: ziyaret ve satış oradan tek ekranda yürür.
+                          if (r?.id) router.push(`/sales/outlets/${r.id}`);
+                          else router.refresh();
+                        });
+                      }}
+                      className="min-h-[44px] rounded-lg bg-ios-blue text-white px-3 py-2 text-[13px] font-semibold flex items-center gap-1">
+                      <Plus size={14} /> Noktayı aç
                     </button>
                   )}
                   <button onClick={() => run(() => setRouteStopStatus(s.id, 'gerceklesti'))}
-                    className="rounded-lg bg-emerald-500/15 text-emerald-300 px-3 py-2 text-[13px] font-semibold flex items-center gap-1">
+                    className="min-h-[44px] rounded-lg bg-emerald-500/15 text-emerald-300 px-3 py-2 text-[13px] font-semibold flex items-center gap-1">
                     <Check size={14} /> Gerçekleşti
                   </button>
                   <button onClick={() => { setNoteFor(s.id === noteFor ? null : s.id); setNote(''); }}
@@ -424,7 +434,7 @@ export default function RoutePlanner({
         {adding && !closed && (
           <form
             action={(fd) => run(() => addRouteStop(fd), () => { setAdding(false); setPicked(null); setQ(''); })}
-            className="px-5 py-4 space-y-3 bg-white/[0.02]"
+            className="px-5 py-4 space-y-3 bg-white/[0.03]"
           >
             <input type="hidden" name="route_plan_id" value={plan.id} />
             <input type="hidden" name="outlet_id" value={stopMode === 'kayitli' ? (picked?.id ?? '') : ''} />

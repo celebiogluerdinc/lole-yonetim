@@ -73,6 +73,21 @@ function readOutlet(fd: FormData) {
 }
 
 /**
+ * Aylık potansiyel (KOLİ). Form bu alanı göndermiyorsa `undefined`
+ * döner ve sütuna hiç dokunulmaz; boş gönderirse null yazılır.
+ *
+ * Bu sayı itiraz analizinin TL ağırlığını veriyor: "fiyat yüksek" diyen
+ * on bakkal ile tek bir otel aynı kayıp değil.
+ */
+function readPotential(fd: FormData): { potential_monthly_volume: number | null } | {} {
+  if (!fd.has('potential_monthly_cases')) return {};
+  const raw = String(fd.get('potential_monthly_cases') ?? '').trim().replace(',', '.');
+  if (!raw) return { potential_monthly_volume: null };
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? { potential_monthly_volume: Math.round(n * 100) / 100 } : {};
+}
+
+/**
  * Nokta formundaki muhasebe / satın alma kişilerini yazar.
  *
  * Bu iki kişi veritabanında outlet_contacts'ta duruyor ama saha açısından
@@ -139,7 +154,12 @@ export async function createOutlet(formData: FormData) {
     .ilike('name', i.name)
     .limit(1).maybeSingle();
   if (dupe && (dupe.district ?? '') === (i.district ?? '')) {
-    return { error: `"${i.name}" adında bir nokta bu ilçede zaten var. Mevcut kaydı kullanın.` };
+    // Mevcut kaydın kimliğini de döndürüyoruz: kullanıcı aynı noktayı
+    // ikinci kez açmak yerine tek tıkla mevcut karta gidebilsin.
+    return {
+      error: `"${i.name}" adında bir nokta bu ilçede zaten var.`,
+      existingId: dupe.id as string
+    };
   }
 
   const { data, error } = await supabase.from('outlets').insert({
@@ -159,6 +179,7 @@ export async function createOutlet(formData: FormData) {
     preferred_contact_time: i.preferred_contact_time || null,
     chain_decision: i.chain_decision,
     status: i.status,
+    ...readPotential(formData),
     assigned_user_id: profile.id,
     created_by: profile.id
   }).select('id').single();
@@ -196,7 +217,8 @@ export async function updateOutlet(formData: FormData) {
     top_selling_drink: i.top_selling_drink || null,
     preferred_contact_time: i.preferred_contact_time || null,
     chain_decision: i.chain_decision,
-    status: i.status
+    status: i.status,
+    ...readPotential(formData)
   }).eq('id', id);
   if (error) return { error: error.message };
 
@@ -206,6 +228,43 @@ export async function updateOutlet(formData: FormData) {
   revalidatePath(`/sales/outlets/${id}`);
   revalidatePath('/sales/outlets');
   return { ok: true };
+}
+
+/**
+ * Tahsilat ve vade riski — elle güncellenen iki sayı.
+ *
+ * Cari takip muhasebede; burada yalnızca temsilcinin kapıda bilmesi
+ * gereken şey duruyor: açık bakiye ve gecikme günü. Nokta kartının
+ * başında kırmızı şerit olarak görünüyor ("menüye giren ama ödemeyen
+ * nokta zarardır").
+ */
+export async function updateOutletBalance(formData: FormData) {
+  const id = String(formData.get('outlet_id') ?? '');
+  if (!uuid.safeParse(id).success) return { error: 'Geçersiz nokta.' };
+  const num = (k: string) => {
+    const raw = String(formData.get(k) ?? '').trim().replace(/\./g, '').replace(',', '.');
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : NaN;
+  };
+  const balance = num('open_balance');
+  const overdue = num('overdue_days');
+  if (Number.isNaN(balance) || Number.isNaN(overdue)) {
+    return { error: 'Bakiye ve gecikme günü sayı olmalı.' };
+  }
+
+  const { supabase } = await salesCtx();
+  const { error } = await supabase.from('outlets').update({
+    open_balance: balance,
+    overdue_days: overdue === null ? null : Math.round(overdue),
+    balance_note: String(formData.get('balance_note') ?? '').trim().slice(0, 300) || null,
+    balance_updated_at: new Date().toISOString()
+  }).eq('id', id);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/sales/outlets/${id}`);
+  revalidatePath('/sales/outlets');
+  return { ok: true as const };
 }
 
 const contactSchema = z.object({
@@ -433,8 +492,21 @@ const visitSchema = z.object({
   customer_comment: z.string().max(2000).optional().default(''),
   private_note: z.string().max(2000).optional().default(''),
   sales_order_id: uuid.nullable().optional(),
+  client_uuid: uuid.nullable().optional(),
   submit: z.boolean().default(false)
 });
+
+/** Sonuca göre varsayılan takip: yazılmasa da söz kayda geçsin. */
+const DEFAULT_FOLLOWUP: Record<string, { action: string; days: number }> = {
+  takip: { action: 'Tekrar ziyaret', days: 7 },
+  tadim_planlandi: { action: 'Tadım yap', days: 3 }
+};
+
+const plusDays = (iso: string, days: number) => {
+  const d = new Date(iso + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+};
 
 /**
  * Ziyaret kaydeder (taslak veya gönderilmiş).
@@ -463,6 +535,7 @@ export async function saveVisit(formData: FormData) {
     customer_comment: s('customer_comment'),
     private_note: s('private_note'),
     sales_order_id: s('sales_order_id') || null,
+    client_uuid: s('client_uuid') || null,
     submit: formData.get('submit') === '1'
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Form eksik.' };
@@ -480,7 +553,30 @@ export async function saveVisit(formData: FormData) {
   const { supabase, profile, companyId } = await salesCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
-  const visitId = s('visit_id');
+  let visitId = s('visit_id');
+
+  /* ÇEVRİMDIŞI TEKİLLEŞTİRME
+     Form, şebeke yokken kuyruğa alınıp sonra yeniden gönderilebiliyor;
+     ilk deneme sunucuya ulaşıp yanıtı kaybolmuş olabilir. Her form
+     açılışında üretilen client_uuid aynı ziyaretin iki kez yazılmasını
+     engelliyor: kayıt varsa güncelleme yoluna giriyoruz. */
+  if (!uuid.safeParse(visitId).success && i.client_uuid) {
+    const { data: prior } = await supabase.from('visits')
+      .select('id').eq('client_uuid', i.client_uuid).eq('user_id', profile.id).maybeSingle();
+    if (prior) visitId = prior.id as string;
+  }
+
+  // Ziyaret süresi: form açılış ve gönderim anı. Saat sırası bozuksa
+  // (cihaz saati) süreyi hiç yazmıyoruz — yanlış süre, süre olmamasından kötü.
+  const isoOrNull = (k: string) => {
+    const v = s(k);
+    const t = v ? Date.parse(v) : NaN;
+    return Number.isFinite(t) ? new Date(t).toISOString() : null;
+  };
+  let startedAt = isoOrNull('started_at');
+  let endedAt = isoOrNull('ended_at');
+  if (startedAt && endedAt && endedAt < startedAt) { startedAt = null; endedAt = null; }
+
   const payload = {
     company_id: companyId,
     outlet_id: i.outlet_id,
@@ -501,11 +597,15 @@ export async function saveVisit(formData: FormData) {
     customer_comment: i.customer_comment || null,
     private_note: i.private_note || null,
     sales_order_id: i.sales_order_id || null,
+    ...(i.client_uuid ? { client_uuid: i.client_uuid } : {}),
+    ...(startedAt ? { started_at: startedAt } : {}),
+    ...(endedAt ? { ended_at: endedAt } : {}),
     status: i.submit ? 'gonderildi' : 'taslak'
   };
 
+  const isUpdate = uuid.safeParse(visitId).success;
   let id = visitId;
-  if (uuid.safeParse(visitId).success) {
+  if (isUpdate) {
     const { error } = await supabase.from('visits').update(payload).eq('id', visitId);
     if (error) return { error: error.message };
   } else {
@@ -534,16 +634,25 @@ export async function saveVisit(formData: FormData) {
     })
     .filter(Boolean) as any[];
 
+  // Güncellemede önce eski puanlar silinir: kullanıcı tüm puanları
+  // temizlediyse eski değerler kalmamalı. Silme hatası yutulmaz —
+  // yutulursa ekleme çift kayıt üretir.
+  if (isUpdate || scoreRows.length) {
+    const { error: eDel } = await supabase.from('visit_scores').delete().eq('visit_id', id);
+    if (eDel) return { error: `Puanlar güncellenemedi: ${eDel.message}` };
+  }
   if (scoreRows.length) {
-    await supabase.from('visit_scores').delete().eq('visit_id', id);
     const { error } = await supabase.from('visit_scores').insert(scoreRows);
     if (error) return { error: `Puanlar kaydedilemedi: ${error.message}` };
   }
 
   // --- Tadım (F04) ---
   const tastedIds = formData.getAll('tasted').map(String).filter(Boolean);
+  if (isUpdate || tastedIds.length) {
+    const { error: eDel } = await supabase.from('visit_tastings').delete().eq('visit_id', id);
+    if (eDel) return { error: `Tadım güncellenemedi: ${eDel.message}` };
+  }
   if (tastedIds.length) {
-    await supabase.from('visit_tastings').delete().eq('visit_id', id);
     const rows = tastedIds.map(pid => {
       const n = (k: string) => {
         const v = Number(String(formData.get(`${k}_${pid}`) ?? '').trim());
@@ -583,10 +692,25 @@ export async function saveVisit(formData: FormData) {
   }
 
   // --- Takip (tüm formların ortak "Sonraki adım" bloğu) ---
-  const action = s('followup_action');
+  /* TAKİP
+     Denetim bulgusu: sonuç "takip" seçilip takip yazılmadan kaydedilen
+     ziyaret, geciken-takip motorunu boş bırakıyordu. Artık söz kayda
+     geçmeden ziyaret kapanmıyor: iş yazılmadıysa sonuca göre varsayılan
+     iş, tarih yazılmadıysa varsayılan vade kullanılıyor. Kapalı bir
+     bölümdeki alan için hata mesajı göstermek yerine makul varsayılan. */
+  let action = s('followup_action');
+  let due = s('followup_due');
+  const def = DEFAULT_FOLLOWUP[i.outcome];
+  // Bu ziyaretin mevcut takipleri: yeniden gönderimde (çevrimdışı kuyruk,
+  // taslaktan gönderme) aynı takip ikinci kez açılmasın.
+  const { data: priorFups } = isUpdate
+    ? await supabase.from('follow_ups')
+        .select('id, action').eq('source_type', 'visit').eq('source_id', id)
+    : { data: [] as any[] };
+  if (i.submit && !action && def && !(priorFups ?? []).length) action = def.action;
+  if (action && (priorFups ?? []).some((f: any) => f.action === action)) action = '';
   if (action) {
-    const due = s('followup_due');
-    if (!due) return { error: 'Takip için son tarih zorunludur.' };
+    if (!due) due = plusDays(i.visit_date, def?.days ?? 7);
     const owner = s('followup_owner') || profile.id;
     const { error } = await supabase.from('follow_ups').insert({
       company_id: companyId,
@@ -667,22 +791,114 @@ export async function deleteFollowUp(id: string, reason?: string) {
 // TAKİPLER
 // ============================================================
 
-export async function closeFollowUp(id: string, evidence: string) {
+/**
+ * Takibi kapatır. Kanıt zorunlu; sonuç ve (kaybedildiyse) sebep isteğe bağlı.
+ *
+ * Sonuç alanı neden var: kayıp sebebi eskiden yalnızca ziyaret anında
+ * yazılabiliyordu. Ziyaret "takip" çıkıp haftalar sonra kaybedilen nokta
+ * hiçbir sebebe bağlanmıyordu — itiraz analizinin en büyük kör noktası.
+ */
+export async function closeFollowUp(
+  id: string, evidence: string,
+  result?: 'kazanildi' | 'kaybedildi' | 'devam' | null,
+  lostReasonId?: string | null
+) {
   if (!uuid.safeParse(id).success) return { error: 'Geçersiz takip.' };
   const ev = z.string().min(3, 'Kapanış kanıtı en az 3 karakter olmalı.').max(1000)
     .safeParse(evidence.trim());
   // Kanıtsız kapanış, kapanmamış takiple aynı şeydir — bu yüzden zorunlu.
   if (!ev.success) return { error: ev.error.issues[0].message };
 
+  const res = result && ['kazanildi', 'kaybedildi', 'devam'].includes(result) ? result : null;
+  const reason = res === 'kaybedildi' && lostReasonId && uuid.safeParse(lostReasonId).success
+    ? lostReasonId : null;
+
   const { supabase, profile } = await salesCtx();
   const { error } = await supabase.from('follow_ups').update({
     status: 'kapandi',
     closure_evidence: ev.data,
     verifier_user_id: profile.id,
-    verified_at: new Date().toISOString()
+    verified_at: new Date().toISOString(),
+    result: res,
+    lost_reason_id: reason
   }).eq('id', id);
   if (error) return { error: error.message };
   revalidatePath('/sales/follow-ups');
   revalidatePath('/sales');
-  return { ok: true };
+  return { ok: true as const };
+}
+
+// ============================================================
+// ZİYARET FOTOĞRAFLARI (raf / teşhir)
+// ============================================================
+
+const MAX_VISIT_PHOTOS = 8;
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const IMG_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+const IMG_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']);
+
+/**
+ * Ziyarete raf/teşhir fotoğrafı ekler.
+ *
+ * Depolama yolu `<şirket>/visits/<ziyaret>/<dosya>` — veritabanındaki
+ * `vphoto_path_guard` politikası bu biçimi zorluyor. Olay kaydı
+ * fotoğraflarıyla aynı desen: önce hepsini denetle, sonra yükle; satır
+ * yazılamazsa dosyayı da bırakma.
+ */
+export async function uploadVisitPhotos(formData: FormData) {
+  const visitId = String(formData.get('visit_id') ?? '');
+  if (!uuid.safeParse(visitId).success) return { error: 'Geçersiz ziyaret.' };
+  const kindRaw = String(formData.get('kind') ?? 'raf');
+  const kind = ['raf', 'dolap', 'teshir', 'tadim', 'diger'].includes(kindRaw) ? kindRaw : 'raf';
+  const files = formData.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
+  if (!files.length) return { error: 'Fotoğraf seçilmedi.' };
+
+  const { supabase, profile } = await salesCtx();
+  const { data: v } = await supabase.from('visits')
+    .select('id, company_id, outlet_id').eq('id', visitId).maybeSingle();
+  if (!v) return { error: 'Ziyaret bulunamadı.' };
+
+  const { count } = await supabase.from('visit_photos')
+    .select('id', { count: 'exact', head: true }).eq('visit_id', visitId);
+  if ((count ?? 0) + files.length > MAX_VISIT_PHOTOS) {
+    return { error: `Bir ziyarete en fazla ${MAX_VISIT_PHOTOS} fotoğraf eklenebilir.` };
+  }
+
+  const ok: { file: File; ext: string }[] = [];
+  for (const file of files) {
+    if (file.size > MAX_PHOTO_BYTES) return { error: `"${file.name}" 10MB sınırını aşıyor.` };
+    const ext = (file.name.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+    if (file.type ? !IMG_TYPES.has(file.type) : !IMG_EXT.has(ext)) {
+      return { error: `"${file.name}" bir fotoğraf değil.` };
+    }
+    ok.push({ file, ext });
+  }
+
+  let added = 0;
+  for (const { file, ext } of ok) {
+    const path = `${v.company_id}/visits/${visitId}/${crypto.randomUUID()}.${ext || 'jpg'}`;
+    const buf = Buffer.from(await file.arrayBuffer());
+    const { error: upErr } = await supabase.storage.from('attachments')
+      .upload(path, buf, { contentType: file.type || 'image/jpeg' });
+    if (upErr) return { error: `Yükleme başarısız: ${upErr.message}`, added };
+
+    const { error: rowErr } = await supabase.from('visit_photos').insert({
+      visit_id: visitId,
+      company_id: v.company_id,
+      uploaded_by: profile.id,
+      storage_path: path,
+      file_name: file.name.slice(0, 200),
+      mime_type: file.type || null,
+      kind
+    });
+    if (rowErr) {
+      await supabase.storage.from('attachments').remove([path]);
+      return { error: `Fotoğraf kaydedilemedi: ${rowErr.message}`, added };
+    }
+    added++;
+  }
+
+  revalidatePath(`/sales/visits/${visitId}`);
+  revalidatePath(`/sales/outlets/${v.outlet_id}`);
+  return { ok: true as const, added };
 }

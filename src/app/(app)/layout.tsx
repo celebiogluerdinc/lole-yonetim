@@ -1,5 +1,5 @@
 import { getCtx } from '@/lib/auth';
-import { salesBadges } from '@/lib/sales-badges';
+import { salesBadges, isSalesManager } from '@/lib/sales-badges';
 import { logout } from '@/app/login/actions';
 import { ROLE_LABEL } from '@/lib/utils';
 import NavLink, { type IconName } from '@/components/NavLink';
@@ -124,17 +124,24 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     ]),
     // Saha satış rozetleri. /sales kabuğu da aynı sayaçları gösteriyor;
     // salesBadges React cache() içinde olduğu için sorgu istek başına
-    // bir kez çalışıp iki yere de yetiyor.
-    isCustomer
+    // bir kez çalışıp iki yere de yetiyor. Dördüncü argüman /sales
+    // kabuğundakiyle AYNI yerden (isSalesManager) gelmeli: farklı değer
+    // farklı önbellek anahtarı demek, sorgu ikiye katlanır.
+    // Satış modülü kapalı olan hesapta (müşteri, sipariş hattı personeli)
+    // rozet de yok — boşuna üç sayım atmıyoruz.
+    blockedRoutes.includes('/sales')
       ? Promise.resolve({ dueFollowUps: 0, draftVisits: 0, pendingOrders: 0 })
-      : salesBadges(supabase, profile.id, companyId)
+      : salesBadges(supabase, profile.id, companyId,
+          isSalesManager(profile.role, managedDepartmentIds))
   ]);
   const appName = appNameRes?.data?.value ?? 'Lole Yönetim';
   let companyName = appName;
   if (companyRes?.data) companyName = companyRes.data.name;
   else if (profile.role === 'super_admin') companyName = 'Tüm Şirketler';
   const unread = unreadCount ?? 0;
-  // Menüde tek rozet var: bekleyen işin toplamı (takip + bekleyen sipariş).
+  // Menüde tek rozet var: kişinin KENDİ bekleyen işi — vadesi gelmiş
+  // takipleri + bekleyen siparişler (temsilcide yalnız kendi açtıkları,
+  // yöneticide onayını bekleyen şirket geneli; kapsam salesBadges'te).
   const sb = salesFupRes as { dueFollowUps: number; draftVisits: number; pendingOrders: number };
   const salesFollowUps = (sb?.dueFollowUps ?? 0) + (sb?.pendingOrders ?? 0);
   const msgUnread = msgUnreadCount ?? 0;
@@ -199,6 +206,33 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       ? (a.href === '/purchasing' ? -1 : 0) - (b.href === '/purchasing' ? -1 : 0)
       : 0) as unknown as { href: string; label: string; icon: IconName; show: boolean; badge: number }[];
 
+  // ---- MOBİL ALT BAR: dört hızlı yuva ----
+  // Eskiden menünün ilk dördüydü ve "Satış & Pazarlama" onuncu sırada
+  // kalıyordu: sahadaki temsilci modüle her dönüşte Menü sayfasını açıp
+  // kutuyu arıyordu. Günde onlarca kez yapılan iş tek dokunuş olmalı;
+  // bu yüzden satış modülü açık olan herkeste yuvalardan biri hep Satış.
+  // Kenar çubuğunun sırası (nav) DEĞİŞMİYOR — yalnız alt bar seçimi.
+  // Sipariş hattında düzen korunuyor: orada "Sipariş Ver" ilk yuvada
+  // olmalı ve satış modülü o şirket türünün parçası değil.
+  const navBy = (href: string) => nav.find(n => n.href === href);
+  let bottomNav = nav.slice(0, 4);
+  const salesNav = navBy('/sales');
+  if (salesNav && !isOrderLine) {
+    const fixed = [navBy('/home'), salesNav, navBy('/messages')]
+      .filter((n): n is (typeof nav)[number] => !!n);
+    // Dördüncü yuva: eski ilk dörtten açıkta kalanlar arasından. Admin için
+    // Yönetim Merkezi (onay bekleyenlerin rozeti orada), diğerlerinde eski
+    // dördüncü sekme neyse o — alışılmış yer değişmesin.
+    const spare = nav.slice(0, 4).filter(n => !fixed.includes(n));
+    const fourth = spare.find(n => n.href === '/merkez') ?? spare[spare.length - 1]
+      ?? nav.find(n => !fixed.includes(n));
+    bottomNav = fourth ? [...fixed, fourth] : fixed;
+  }
+  // Menü sayfası "alt barda görünmeyenlerin rozet toplamı"nı ilk dörtten
+  // sonrasını toplayarak buluyor; alt bardakiler başa alınmazsa Satış
+  // rozeti hem barda hem Menü düğmesinde iki kez sayılırdı.
+  const menuItems = [...bottomNav, ...nav.filter(n => !bottomNav.includes(n))];
+
   return (
     <ConfirmProvider>
     <div className="min-h-dvh flex">
@@ -247,12 +281,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
       {/* Bottom bar — mobile: 4 quick tabs + full menu sheet */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 bg-[#1C1C1E]/85 backdrop-blur-xl border-t border-white/[0.10] flex justify-around py-1.5 z-40 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
-        {nav.slice(0, 4).map(n => (
+        {bottomNav.map(n => (
           <NavLink key={n.href} href={n.href} label={n.label} icon={n.icon} badge={n.badge} mobile
-            short={({ 'Ana Sayfa': 'Anasayfa', 'Yönetim Merkezi': 'Merkez', 'Lole Asistan': 'Asistan', 'Bildirimler': 'Bildirim', 'Ödeme Talepleri': 'Ödeme', 'Satın Alma': 'Satın Al', 'Sipariş Ver': 'Sipariş', 'Olay Kaydı': 'Olay', 'Toplantılar': 'Toplantı' } as Record<string, string>)[n.label] ?? n.label} />
+            short={({ 'Ana Sayfa': 'Anasayfa', 'Yönetim Merkezi': 'Merkez', 'Lole Asistan': 'Asistan', 'Bildirimler': 'Bildirim', 'Ödeme Talepleri': 'Ödeme', 'Satın Alma': 'Satın Al', 'Sipariş Ver': 'Sipariş', 'Olay Kaydı': 'Olay', 'Toplantılar': 'Toplantı', 'Satış & Pazarlama': 'Satış' } as Record<string, string>)[n.label] ?? n.label} />
         ))}
         <MobileMenu
-          items={nav.map(({ href, label, icon, badge }) => ({ href, label, icon, badge }))}
+          items={menuItems.map(({ href, label, icon, badge }) => ({ href, label, icon, badge }))}
           userName={profile.full_name || profile.email}
           roleLabel={ROLE_LABEL[profile.role]}
         />

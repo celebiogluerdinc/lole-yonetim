@@ -261,3 +261,58 @@ export function segmentFromPct(pct: number | null): Segment | null {
   if (pct >= 50) return 'B';
   return 'C';
 }
+
+
+// ---------- HUNİ (v_outlet_funnel.stage) ----------
+// Aşama okuma anında hesaplanır; outlets.status'tan bağımsızdır.
+export type FunnelStage =
+  | 'havuz' | 'temas' | 'tadim' | 'teklif' | 'ilk_siparis'
+  | 'aktif' | 'donuk' | 'kaybedildi' | 'pasif';
+
+/** Huni sırası — grafikte ve listelerde bu sırayla gösterilir. */
+export const FUNNEL_ORDER: FunnelStage[] = [
+  'havuz', 'temas', 'tadim', 'teklif', 'ilk_siparis', 'aktif', 'donuk', 'kaybedildi'
+];
+
+export const FUNNEL_LABEL: Record<FunnelStage, string> = {
+  havuz: 'Havuz',
+  temas: 'Temas',
+  tadim: 'Tadım',
+  teklif: 'Teklif',
+  ilk_siparis: 'İlk sipariş',
+  aktif: 'Aktif',
+  donuk: 'Donuk',
+  kaybedildi: 'Kaybedildi',
+  pasif: 'Pasif'
+};
+
+export const FUNNEL_HINT: Record<FunnelStage, string> = {
+  havuz: 'Kartotekte, henüz temas yok',
+  temas: 'Ziyaret edildi',
+  tadim: 'Tadım yapıldı',
+  teklif: 'Yazılı teklif verildi',
+  ilk_siparis: 'Tek sipariş — ikinci sipariş gerçek dönüşüm',
+  aktif: 'İki ve üzeri sipariş, döngü içinde',
+  donuk: 'Sipariş vermişti, döngüsünü aştı',
+  kaybedildi: 'Kaybedildi olarak işaretlendi',
+  pasif: 'Pasife alındı'
+};
+
+export const FUNNEL_COLOR: Record<FunnelStage, string> = {
+  havuz: 'bg-white/10 text-[#AEAEB2]',
+  temas: 'bg-sky-500/20 text-sky-300',
+  tadim: 'bg-indigo-500/20 text-indigo-300',
+  teklif: 'bg-blue-500/20 text-blue-300',
+  ilk_siparis: 'bg-amber-500/20 text-amber-300',
+  aktif: 'bg-emerald-500/20 text-emerald-300',
+  donuk: 'bg-rose-500/20 text-rose-300',
+  kaybedildi: 'bg-white/10 text-[#8E8E93]',
+  pasif: 'bg-white/10 text-[#8E8E93]'
+};
+
+/** Takibin sonucu (follow_ups.result) */
+export const FOLLOWUP_RESULT_LABEL: Record<'kazanildi' | 'kaybedildi' | 'devam', string> = {
+  kazanildi: 'Kazanıldı',
+  kaybedildi: 'Kaybedildi',
+  devam: 'Devam ediyor'
+};

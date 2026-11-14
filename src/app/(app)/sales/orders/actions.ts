@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { getCtx } from '@/lib/auth';
 import { deleteMessage, logDeletion } from '@/lib/sales-delete';
+import { BOTTLES_PER_CASE } from '@/lib/commerce-format';
 
 /**
  * TİCARET — server action'ları (Faz 2)
@@ -26,6 +27,24 @@ async function salesCtx() {
 function canDelete(ctx: Awaited<ReturnType<typeof salesCtx>>): boolean {
   return ['super_admin', 'admin'].includes(ctx.profile.role)
     || ctx.managedDepartmentIds.length > 0;
+}
+
+/**
+ * Onay yetkisi — HATA DURUMUNDA KAPALI.
+ *
+ * Eski kalıp `if (allowed === false)` idi ve RPC'nin hatasını hiç
+ * okumuyordu. RPC hata verdiğinde (fonksiyon yok, ağ, RLS) `data` null
+ * döner; `null === false` yanlış olduğu için kontrol GEÇİYORDU — yani
+ * yetki denetimi tam da bozulduğu anda herkese izin veriyordu.
+ * Güvenlik kontrolü şüphede reddetmeli: yalnızca açık `true` geçer.
+ */
+async function canApprove(
+  supabase: any, companyId: string, code: string, userId: string
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('fn_can_approve', {
+    cid: companyId, code, uid: userId
+  });
+  return !error && data === true;
 }
 
 /** Postgres hatalarını kullanıcıya gösterilebilir Türkçeye çevirir. */
@@ -91,7 +110,6 @@ const quoteSchema = z.object({
  * tutuyor. Çevrim tek yerde — burada — yapılır. İki birim iki yerde
  * dönüştürülseydi er geç biri unuturdu.
  */
-const BOTTLES_PER_CASE = 12;
 function readQuoteItems(fd: FormData) {
   const rows: { product_id: string; bottles: number; unit_price: number; discount: number; position: number }[] = [];
   let pos = 0;
@@ -203,7 +221,8 @@ export async function updateQuote(formData: FormData) {
   }).eq('id', id);
   if (error) return { error: friendly(error.message) };
 
-  await supabase.from('quote_items').delete().eq('quote_id', id);
+  const { error: eDel } = await supabase.from('quote_items').delete().eq('quote_id', id);
+  if (eDel) return { error: `Kalemler güncellenemedi: ${friendly(eDel.message)}` };
   const { error: e2 } = await supabase.from('quote_items')
     .insert(items.map(r => ({ ...r, quote_id: id })));
   if (e2) return { error: `Kalemler güncellenemedi: ${friendly(e2.message)}` };
@@ -223,10 +242,7 @@ export async function checkQuote(quoteId: string, step: 'mali_kontrol' | 'satis_
   const { supabase, profile, companyId } = await salesCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
-  const { data: allowed } = await supabase.rpc('fn_can_approve', {
-    cid: companyId, code: step, uid: profile.id
-  });
-  if (allowed === false) {
+  if (!(await canApprove(supabase, companyId, step, profile.id))) {
     return { error: 'Bu kontrolü yapma yetkiniz yok (ilgili departman üyesi olmalısınız).' };
   }
 
@@ -378,8 +394,13 @@ export async function createOrderFromQuote(formData: FormData) {
     .insert(items.map(r => ({ ...r, order_id: order.id })));
   if (e2) return { error: `Sipariş kalemleri kaydedilemedi: ${friendly(e2.message)}` };
 
-  // teklif kabul edildi olarak işaretlenir
-  await supabase.from('quotes').update({ status: 'kabul' }).eq('id', quote.id);
+  // teklif kabul edildi olarak işaretlenir (hata yutulmaz: sipariş var,
+  // teklif "onaylı" kalırsa liste yanlış "siparişe çevrilmeli" der)
+  const { error: eQ } = await supabase.from('quotes').update({ status: 'kabul' }).eq('id', quote.id);
+  if (eQ) return { error: `Sipariş açıldı ama teklif güncellenemedi: ${friendly(eQ.message)}`, id: order.id as string };
+
+  // anlaşılan fiyat noktanın kalıcı fiyatı olur
+  await supabase.rpc('fn_record_agreed_prices', { p_order: order.id });
 
   revalidatePath('/sales/orders');
   revalidatePath(`/sales/orders/quotes/${quote.id}`);
@@ -415,7 +436,9 @@ export async function createDirectOrder(formData: FormData) {
   }).safeParse({
     outlet_id: s('outlet_id'),
     visit_id: s('visit_id') || null,
-    verbal_note: s('verbal_note'),
+    // Not isteğe bağlı: sahada tek zorunlu şey ürün ve fiyat. Boş gelirse
+    // veritabanı kuralını (verbal_note zorunlu) karşılayan nötr bir metin yazılır.
+    verbal_note: s('verbal_note') || 'Sahada sözlü anlaşma',
     vat_rate: s('vat_rate') || '1',
     payment_method: s('payment_method')
   });
@@ -456,17 +479,26 @@ export async function createDirectOrder(formData: FormData) {
   }).select('id').single();
   if (eq) return { error: friendly(eq.message) };
 
-  const { error: eqi } = await supabase.from('quote_items').insert(
-    items.map((r, idx) => ({
-      quote_id: quote.id,
-      product_id: r.product_id,
-      bottles: r.paid_bottles + r.free_bottles,
-      unit_price: r.unit_price,
-      discount: 0,
-      position: idx
-    }))
-  );
-  if (eqi) return { error: `Sözlü teklif kalemleri kaydedilemedi: ${friendly(eqi.message)}` };
+  // Teklif kalemine yalnız ÜCRETLİ şişe girer. Eskiden bedelsiz de
+  // ekleniyordu: teklif toplamı bedelsiz koliyi tam fiyatla sayıyor,
+  // sipariş saymıyordu — aynı satış iki belgede iki tutar gösteriyordu.
+  const paidLines = items.filter(r => r.paid_bottles > 0);
+  if (paidLines.length) {
+    const { error: eqi } = await supabase.from('quote_items').insert(
+      paidLines.map((r, idx) => ({
+        quote_id: quote.id,
+        product_id: r.product_id,
+        bottles: r.paid_bottles,
+        unit_price: r.unit_price,
+        discount: 0,
+        position: idx
+      }))
+    );
+    if (eqi) {
+      await supabase.from('quotes').delete().eq('id', quote.id);
+      return { error: `Sözlü teklif kalemleri kaydedilemedi: ${friendly(eqi.message)}` };
+    }
+  }
 
   // 2 · sipariş
   const { data: order, error: eo } = await supabase.from('sales_orders').insert({
@@ -498,12 +530,51 @@ export async function createDirectOrder(formData: FormData) {
 
   const { error: eoi } = await supabase.from('sales_order_items')
     .insert(items.map(r => ({ ...r, order_id: order.id })));
-  if (eoi) return { error: `Sipariş kalemleri kaydedilemedi: ${friendly(eoi.message)}` };
+  if (eoi) {
+    // kalemsiz, 0 tutarlı sipariş kalmasın
+    await supabase.from('sales_orders').delete().eq('id', order.id);
+    await supabase.from('quotes').delete().eq('id', quote.id);
+    return { error: `Sipariş kalemleri kaydedilemedi: ${friendly(eoi.message)}` };
+  }
 
-  // 3 · ziyaret varsa sonucu "sipariş"e çevrilir
-  if (i.visit_id) {
+  // 3 · anlaşılan koli fiyatı noktanın kalıcı fiyatı olur: bir sonraki
+  //     satışta form bu fiyatı önerir, fiyat erimesi ölçülebilir.
+  await supabase.rpc('fn_record_agreed_prices', { p_order: order.id });
+
+  /* 4 · ZİYARET KENDİLİĞİNDEN YAZILIR
+     Eskiden satış yapan temsilci ayrıca ziyaret formunu açıp sonucu
+     "sipariş" seçmek ve listeden bu siparişi bulup bağlamak zorundaydı:
+     en değerli olay en pahalı akıştı. Artık satış kaydı ziyareti de
+     yazıyor. Bugün bu noktaya ait ziyareti varsa ona bağlanır, yoksa
+     yeni bir "sipariş" ziyareti açılır. */
+  const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
+  let visitId = i.visit_id || null;
+  if (!visitId) {
+    const { data: todays } = await supabase.from('visits')
+      .select('id').eq('outlet_id', i.outlet_id).eq('user_id', profile.id)
+      .eq('visit_date', todayIso).is('sales_order_id', null)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    visitId = todays?.id ?? null;
+  }
+  if (visitId) {
     await supabase.from('visits')
-      .update({ sales_order_id: order.id, outcome: 'siparis' }).eq('id', i.visit_id);
+      .update({ sales_order_id: order.id, outcome: 'siparis' }).eq('id', visitId);
+  } else {
+    const { data: nv } = await supabase.from('visits').insert({
+      company_id: companyId,
+      outlet_id: i.outlet_id,
+      user_id: profile.id,
+      visit_date: todayIso,
+      visit_type: 'siparis',
+      outcome: 'siparis',
+      sales_order_id: order.id,
+      private_note: 'Doğrudan satış kaydından otomatik oluştu.',
+      status: 'gonderildi'
+    }).select('id').maybeSingle();
+    visitId = nv?.id ?? null;
+  }
+  if (visitId) {
+    await supabase.from('sales_orders').update({ visit_id: visitId }).eq('id', order.id);
   }
 
   revalidatePath('/sales/orders');
@@ -563,21 +634,128 @@ export async function deleteOrder(orderId: string, reason?: string) {
   return { ok: true as const };
 }
 
+/**
+ * TEKLİFİ TEK ADIMDA ONAYLA
+ *
+ * Mali kontrol + satış kontrolü + onay üç ayrı tıktı ve denetim şunu
+ * buldu: onay adımları tüm departmanlara açık olduğu için ikisini de
+ * aynı kişi basıyordu — iki imza, tek kişinin iki tıkı.
+ *
+ * Artık tek düğme. Kural kaybolmuyor, yeri değişiyor: fiyat LİSTE
+ * FİYATININ ALTINDAYSA onayı yalnız admin veya departman müdürü
+ * verebilir. İkinci göz gerçekten gerektiği yerde isteniyor.
+ * Veritabanı kuralı (fn_quote_guard) aynen duruyor: iki kontrol damgası
+ * da yazılıyor, yalnızca tek işlemde.
+ */
+export async function approveQuote(quoteId: string) {
+  if (!uuid.safeParse(quoteId).success) return { error: 'Geçersiz teklif.' };
+  const ctx = await salesCtx();
+  const { supabase, profile, companyId } = ctx;
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const { data: q } = await supabase.from('quotes')
+    .select('id, status, outlet_id, price_list_id').eq('id', quoteId).maybeSingle();
+  if (!q) return { error: 'Teklif bulunamadı.' };
+  if (!['taslak', 'kontrolde'].includes(q.status)) {
+    return { error: 'Bu teklif zaten onaylanmış veya kapanmış.' };
+  }
+
+  const [okFin, okSales] = await Promise.all([
+    canApprove(supabase, companyId, 'mali_kontrol', profile.id),
+    canApprove(supabase, companyId, 'satis_kontrolu', profile.id)
+  ]);
+  if (!okFin || !okSales) return { error: 'Teklif onaylama yetkiniz yok.' };
+
+  // Liste altı fiyat var mı?
+  const [{ data: items }, { data: list }] = await Promise.all([
+    supabase.from('quote_items').select('product_id, unit_price').eq('quote_id', quoteId),
+    q.price_list_id
+      ? supabase.from('price_list_items').select('product_id, unit_price').eq('price_list_id', q.price_list_id)
+      : Promise.resolve({ data: [] } as any)
+  ]);
+  if (!(items ?? []).length) return { error: 'Kalemsiz teklif onaylanamaz.' };
+
+  const listOf = new Map<string, number>(
+    ((list ?? []) as any[]).map(r => [r.product_id as string, Number(r.unit_price)])
+  );
+  const below = ((items ?? []) as any[]).some(it => {
+    const lp = listOf.get(it.product_id);
+    return lp !== undefined && Number(it.unit_price) < lp - 0.0001;
+  });
+  const isManager = ['super_admin', 'admin'].includes(profile.role)
+    || ctx.managedDepartmentIds.length > 0;
+  if (below && !isManager) {
+    return { error: 'Liste fiyatının altında teklif: onayı admin veya müdür vermeli.' };
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabase.from('quotes').update({
+    finance_checked_by: profile.id, finance_checked_at: now,
+    sales_checked_by: profile.id, sales_checked_at: now,
+    status: 'onayli'
+  }).eq('id', quoteId);
+  if (error) return { error: friendly(error.message) };
+
+  revalidatePath(`/sales/orders/quotes/${quoteId}`);
+  revalidatePath('/sales/orders');
+  return { ok: true as const, belowList: below };
+}
+
+/**
+ * SİPARİŞİ TEK ADIMDA ONAYLA
+ *
+ * Stok teyidi + sipariş kabulü + "onaylı" durumu üç ayrı tıktı. Stok
+ * takibi bu modülde olmadığı için stok teyidi sahada karşılığı olmayan
+ * bir adımdı. Tek düğme üçünü birlikte yapıyor; veritabanı kuralı
+ * (fn_order_guard) aynen duruyor.
+ */
+export async function approveOrder(orderId: string) {
+  if (!uuid.safeParse(orderId).success) return { error: 'Geçersiz sipariş.' };
+  const { supabase, profile, companyId } = await salesCtx();
+  if (!companyId) return { error: 'Önce bir şirket seçin.' };
+
+  const [okStock, okAccept] = await Promise.all([
+    canApprove(supabase, companyId, 'stok_sevk_teyidi', profile.id),
+    canApprove(supabase, companyId, 'siparis_kabulu', profile.id)
+  ]);
+  if (!okStock || !okAccept) return { error: 'Sipariş onaylama yetkiniz yok.' };
+
+  const { data: o } = await supabase.from('sales_orders')
+    .select('id, status').eq('id', orderId).maybeSingle();
+  if (!o) return { error: 'Sipariş bulunamadı.' };
+  if (!['taslak', 'onay_bekliyor'].includes(o.status)) {
+    return { error: 'Bu sipariş zaten onaylanmış veya kapanmış.' };
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabase.from('sales_orders').update({
+    stock_confirmed_by: profile.id, stock_confirmed_at: now,
+    order_accepted_by: profile.id, order_accepted_at: now,
+    status: 'onayli'
+  }).eq('id', orderId);
+  if (error) return { error: friendly(error.message) };
+
+  revalidatePath(`/sales/orders/${orderId}`);
+  revalidatePath('/sales/orders');
+  revalidatePath('/sales');
+  return { ok: true as const };
+}
+
 export async function confirmOrderStock(orderId: string) {
   if (!uuid.safeParse(orderId).success) return { error: 'Geçersiz sipariş.' };
   const { supabase, profile, companyId } = await salesCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
-  const { data: allowed } = await supabase.rpc('fn_can_approve', {
-    cid: companyId, code: 'stok_sevk_teyidi', uid: profile.id
-  });
-  if (allowed === false) return { error: 'Stok ve sevk teyidi verme yetkiniz yok.' };
+  if (!(await canApprove(supabase, companyId, 'stok_sevk_teyidi', profile.id))) {
+    return { error: 'Stok ve sevk teyidi verme yetkiniz yok.' };
+  }
 
   const { error } = await supabase.from('sales_orders').update({
     stock_confirmed_by: profile.id, stock_confirmed_at: new Date().toISOString()
   }).eq('id', orderId);
   if (error) return { error: friendly(error.message) };
   revalidatePath(`/sales/orders/${orderId}`);
+  revalidatePath('/sales/orders');
   return { ok: true as const };
 }
 
@@ -586,16 +764,16 @@ export async function acceptOrder(orderId: string) {
   const { supabase, profile, companyId } = await salesCtx();
   if (!companyId) return { error: 'Önce bir şirket seçin.' };
 
-  const { data: allowed } = await supabase.rpc('fn_can_approve', {
-    cid: companyId, code: 'siparis_kabulu', uid: profile.id
-  });
-  if (allowed === false) return { error: 'Sipariş kabulü verme yetkiniz yok.' };
+  if (!(await canApprove(supabase, companyId, 'siparis_kabulu', profile.id))) {
+    return { error: 'Sipariş kabulü verme yetkiniz yok.' };
+  }
 
   const { error } = await supabase.from('sales_orders').update({
     order_accepted_by: profile.id, order_accepted_at: new Date().toISOString()
   }).eq('id', orderId);
   if (error) return { error: friendly(error.message) };
   revalidatePath(`/sales/orders/${orderId}`);
+  revalidatePath('/sales/orders');
   return { ok: true as const };
 }
 

@@ -5,7 +5,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Check, AlertTriangle, CalendarClock, MapPin } from 'lucide-react';
 import { fmtDate } from '@/lib/utils';
-import { closeFollowUp, deleteFollowUp } from '@/app/(app)/sales/actions';
+import { deleteFollowUp } from '@/app/(app)/sales/actions';
+import FollowUpClose from '@/components/sales/FollowUpClose';
+import { FOLLOWUP_RESULT_LABEL } from '@/lib/sales-types';
 import DeleteButton from '@/components/sales/DeleteButton';
 import { addOutletsToDay } from '@/app/(app)/sales/routes/actions';
 
@@ -17,6 +19,7 @@ interface Row {
   source_type: string;
   closure_evidence: string | null;
   verified_at: string | null;
+  result: 'kazanildi' | 'kaybedildi' | 'devam' | null;
   outlet_id: string | null;
   outlets: { id: string; name: string } | null;
   profiles: { full_name: string } | null;
@@ -42,12 +45,18 @@ const SOURCE_LABEL: Record<string, string> = {
  * Kapatmak için kapanış kanıtı zorunlu — kanıtsız kapanış, kapanmamış
  * takiple aynı şeydir ve kapanış oranını yapay olarak yükseltir.
  */
-export default function FollowUpList({ rows, today }: { rows: Row[]; today: string }) {
+export default function FollowUpList({
+  rows, today, reasons = [], loadError
+}: {
+  rows: Row[]; today: string;
+  reasons?: { id: string; label: string }[];
+  /** Sorgu hatası: sessiz boş liste yerine görünür uyarı */
+  loadError?: string | null;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [openFor, setOpenFor] = useState<string | null>(null);
-  const [evidence, setEvidence] = useState('');
 
   const groups = useMemo(() => {
     const open = rows.filter(r => r.status === 'acik');
@@ -60,16 +69,6 @@ export default function FollowUpList({ rows, today }: { rows: Row[]; today: stri
   }, [rows, today]);
 
   const [msg, setMsg] = useState<string | null>(null);
-
-  function close(id: string) {
-    setErr(null); setMsg(null);
-    start(async () => {
-      const r = await closeFollowUp(id, evidence);
-      if (r?.error) { setErr(r.error); return; }
-      setOpenFor(null); setEvidence('');
-      router.refresh();
-    });
-  }
 
   /**
    * Takibi bugünün rotasına atar.
@@ -100,6 +99,9 @@ export default function FollowUpList({ rows, today }: { rows: Row[]; today: stri
         </p>
       </header>
 
+      {loadError && (
+        <p className="alert-error">Takipler yüklenemedi: {loadError}</p>
+      )}
       {err && <p className="alert-error">{err}</p>}
       {msg && (
         <p className="text-[13px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-3 py-2">
@@ -115,11 +117,11 @@ export default function FollowUpList({ rows, today }: { rows: Row[]; today: stri
       )}
 
       <Group title="Gecikmiş" tone="bad" rows={groups.overdue}
-        {...{ openFor, setOpenFor, evidence, setEvidence, close, pending, today, toRoute }} />
+        {...{ openFor, setOpenFor, reasons, pending, today, toRoute }} />
       <Group title="Bugün" tone="warn" rows={groups.today}
-        {...{ openFor, setOpenFor, evidence, setEvidence, close, pending, today, toRoute }} />
+        {...{ openFor, setOpenFor, reasons, pending, today, toRoute }} />
       <Group title="Yaklaşan" rows={groups.upcoming}
-        {...{ openFor, setOpenFor, evidence, setEvidence, close, pending, today, toRoute }} />
+        {...{ openFor, setOpenFor, reasons, pending, today, toRoute }} />
 
       {groups.closed.length > 0 && (
         <section className="card overflow-hidden">
@@ -127,7 +129,17 @@ export default function FollowUpList({ rows, today }: { rows: Row[]; today: stri
           <div className="divide-y divide-white/[0.08]">
             {groups.closed.map(r => (
               <div key={r.id} className="px-5 py-3">
-                <p className="text-sm line-through text-[#8E8E93] truncate">{r.action}</p>
+                <p className="text-sm text-[#8E8E93] truncate flex items-center gap-2">
+                  <span className="line-through truncate">{r.action}</span>
+                  {r.result && (
+                    <span className={`badge shrink-0 no-underline ${
+                      r.result === 'kazanildi' ? 'bg-emerald-500/20 text-emerald-300'
+                        : r.result === 'kaybedildi' ? 'bg-rose-500/20 text-rose-300'
+                        : 'bg-ios-blue/20 text-ios-blue'}`}>
+                      {FOLLOWUP_RESULT_LABEL[r.result]}
+                    </span>
+                  )}
+                </p>
                 {r.closure_evidence && (
                   <p className="text-[12px] text-emerald-300 mt-0.5">Kanıt: {r.closure_evidence}</p>
                 )}
@@ -141,12 +153,12 @@ export default function FollowUpList({ rows, today }: { rows: Row[]; today: stri
 }
 
 function Group({
-  title, tone, rows, openFor, setOpenFor, evidence, setEvidence, close, pending, toRoute
+  title, tone, rows, openFor, setOpenFor, reasons, pending, toRoute
 }: {
   title: string; tone?: 'bad' | 'warn'; rows: Row[];
   openFor: string | null; setOpenFor: (v: string | null) => void;
-  evidence: string; setEvidence: (v: string) => void;
-  close: (id: string) => void; pending: boolean; today: string;
+  reasons: { id: string; label: string }[];
+  pending: boolean; today: string;
   toRoute: (outletId: string) => void;
 }) {
   if (!rows.length) return null;
@@ -178,33 +190,22 @@ function Group({
             </div>
 
             {openFor === r.id ? (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input value={evidence} onChange={e => setEvidence(e.target.value)}
-                  className="input !py-2 !text-[13px]"
-                  placeholder="Kapanış kanıtı (zorunlu) — ne yapıldı?" />
-                <div className="flex gap-2 shrink-0">
-                  <button onClick={() => close(r.id)} disabled={pending} className="btn-primary !py-2 !text-[13px]">
-                    Kapat
-                  </button>
-                  <button onClick={() => setOpenFor(null)} className="btn-ghost !py-2 !text-[13px]">
-                    Vazgeç
-                  </button>
-                </div>
-              </div>
+              <FollowUpClose id={r.id} reasons={reasons}
+                onCancel={() => setOpenFor(null)} onDone={() => setOpenFor(null)} />
             ) : (
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => { setOpenFor(r.id); setEvidence(''); }}
-                  className="btn-ghost !py-1.5 !text-[13px]">
-                  <Check size={14} /> Tamamlandı olarak kapat
+                <button onClick={() => setOpenFor(r.id)}
+                  className="min-h-[44px] rounded-lg bg-emerald-500/15 text-emerald-300 px-3.5 text-[13.5px] font-semibold flex items-center gap-1.5">
+                  <Check size={15} /> Kapat
                 </button>
                 {r.outlet_id && (
                   <>
                     <button onClick={() => toRoute(r.outlet_id!)} disabled={pending}
-                      className="btn-ghost !py-1.5 !text-[13px]">
+                      className="btn-ghost !text-[13.5px]">
                       <MapPin size={14} /> Bugünün rotasına ekle
                     </button>
                     <Link href={`/sales/visits/new?outlet=${r.outlet_id}`}
-                      className="btn-ghost !py-1.5 !text-[13px]">
+                      className="btn-ghost !text-[13.5px]">
                       Ziyareti aç
                     </Link>
                   </>

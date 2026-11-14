@@ -7,18 +7,19 @@ import {
 } from '@/lib/sales-types';
 import PrintButton from '@/components/sales/PrintButton';
 import { VisitDeleteButton } from '@/components/sales/DocDeleteButtons';
+import VisitPhotos from '@/components/sales/VisitPhotos';
 
 export const dynamic = 'force-dynamic';
 
 export default async function VisitDetail({ params }: { params: { id: string } }) {
-  const { supabase } = await getCtx();
+  const { supabase, profile, managedDepartmentIds } = await getCtx();
 
   const { data: visit } = await supabase.from('visits')
     .select('*, outlets:outlet_id(id, name, city, district), profiles:user_id(full_name)')
     .eq('id', params.id).maybeSingle();
   if (!visit) notFound();
 
-  const [{ data: scores }, { data: tastings }, { data: summary }, { data: fups }, { data: reasons }] =
+  const [{ data: scores }, { data: tastings }, { data: summary }, { data: fups }, { data: reasons }, { data: photoRows }] =
     await Promise.all([
       supabase.from('visit_scores')
         .select('score, evidence, score_criteria:criterion_id(label, grp)')
@@ -31,8 +32,30 @@ export default async function VisitDetail({ params }: { params: { id: string } }
       supabase.from('follow_ups')
         .select('id, action, due_date, status, closure_evidence, profiles:owner_user_id(full_name)')
         .eq('source_type', 'visit').eq('source_id', visit.id),
-      supabase.from('no_order_reasons').select('id, label')
+      supabase.from('no_order_reasons').select('id, label'),
+      supabase.from('visit_photos')
+        .select('id, storage_path, kind, file_name').eq('visit_id', visit.id).order('created_at')
     ]);
+
+  // Depo özel: görüntüler bir saatlik imzalı adresle açılıyor.
+  const paths = ((photoRows ?? []) as any[]).map(p => p.storage_path).filter(Boolean);
+  const { data: signed } = paths.length
+    ? await supabase.storage.from('attachments').createSignedUrls(paths, 3600)
+    : { data: [] as any[] };
+  const urlOf = new Map<string, string>(
+    ((signed ?? []) as any[]).filter(x => x?.signedUrl).map(x => [x.path as string, x.signedUrl as string]));
+  const photos = ((photoRows ?? []) as any[]).map(p => ({
+    id: p.id as string, url: urlOf.get(p.storage_path) ?? null,
+    kind: p.kind as string | null, file_name: p.file_name as string | null
+  }));
+  const canAddPhoto = visit.user_id === profile.id
+    || ['super_admin', 'admin'].includes(profile.role) || managedDepartmentIds.length > 0;
+
+  // Ziyaret süresi: form açılışı → gönderim. 1 dk altı ve 4 saat üstü
+  // gösterilmiyor (formu açık unutmak süre değildir).
+  const durMin = visit.started_at && visit.ended_at
+    ? Math.round((Date.parse(visit.ended_at) - Date.parse(visit.started_at)) / 60000) : null;
+  const duration = durMin !== null && durMin >= 1 && durMin <= 240 ? durMin : null;
 
   const reasonLabel = (id: string | null) =>
     id ? (reasons ?? []).find((r: any) => r.id === id)?.label ?? '—' : null;
@@ -63,6 +86,7 @@ export default async function VisitDetail({ params }: { params: { id: string } }
               {fmtDate(visit.visit_date)}
               {' · '}{VISIT_TYPE_LABEL[visit.visit_type as keyof typeof VISIT_TYPE_LABEL]}
               {visit.profiles?.full_name ? ` · ${visit.profiles.full_name}` : ''}
+              {duration !== null ? ` · ${duration} dk` : ''}
             </p>
           </div>
           <div className="flex flex-col items-end gap-1.5 shrink-0">
@@ -78,14 +102,20 @@ export default async function VisitDetail({ params }: { params: { id: string } }
           </div>
         </div>
 
-        {visit.met_person_name && (
+        {(visit.met_person_name || visit.met_decision_authority) && (
           <p className="text-sm text-[#AEAEB2] mt-3">
-            Görüşülen: {visit.met_person_name}
+            Görüşülen: {visit.met_person_name || '—'}
             {visit.met_person_role ? ` (${visit.met_person_role})` : ''}
             {visit.met_decision_authority
               ? ` · ${AUTHORITY_LABEL[visit.met_decision_authority as keyof typeof AUTHORITY_LABEL]}`
               : ''}
           </p>
+        )}
+        {visit.sales_order_id && (
+          <Link href={`/sales/orders/${visit.sales_order_id}`}
+            className="inline-block mt-2 text-[13px] text-ios-blue hover:underline">
+            Bağlı sipariş →
+          </Link>
         )}
       </header>
 
@@ -111,7 +141,7 @@ export default async function VisitDetail({ params }: { params: { id: string } }
               <p className="font-medium">{reasonLabel(visit.objection_real_id) ?? '—'}</p>
             </div>
           </div>
-          <Block label="Açıklama" value={visit.objection_note} />
+          <Block label="Açıklama" value={visit.objection_stated_note} />
           <Block label="Verdiğimiz yanıt" value={visit.our_answer} />
         </section>
       )}
@@ -163,9 +193,11 @@ export default async function VisitDetail({ params }: { params: { id: string } }
         </section>
       )}
 
+      <VisitPhotos visitId={visit.id} photos={photos} canAdd={canAddPhoto} />
+
       {(visit.customer_comment || visit.private_note) && (
         <section className="card p-5 space-y-3">
-          <Block label="Müşteri görüşü" value={visit.customer_comment} />
+          <Block label="Not" value={visit.customer_comment} />
           <Block label="Özel not" value={visit.private_note} />
         </section>
       )}

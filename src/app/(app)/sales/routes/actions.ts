@@ -209,12 +209,16 @@ export async function groupStopsByDistrict(planId: string) {
     return a.position - b.position;
   });
 
-  for (let i = 0; i < sorted.length; i++) {
-    if (sorted[i].position === i) continue;
-    const { error: e } = await supabase.from('route_stops')
-      .update({ position: i }).eq('id', sorted[i].id);
-    if (e) return { error: e.message };
-  }
+  // Yalnız yeri değişen duraklar, hepsi birden: 20 duraklı rotada sıralı
+  // yazım 20 ardışık ağ turu demekti.
+  const results = await Promise.all(
+    sorted
+      .map((st: any, i: number) => ({ st, i }))
+      .filter(({ st, i }) => st.position !== i)
+      .map(({ st, i }) => supabase.from('route_stops').update({ position: i }).eq('id', st.id))
+  );
+  const failed = results.find((r: any) => r.error);
+  if (failed?.error) return { error: failed.error.message };
 
   revalidatePath('/sales/routes');
   revalidatePath('/sales');

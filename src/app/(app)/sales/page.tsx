@@ -1,6 +1,6 @@
 import { getCtx } from '@/lib/auth';
 import { TZ } from '@/lib/utils';
-import { salesBadges } from '@/lib/sales-badges';
+import { salesBadges, isSalesManager } from '@/lib/sales-badges';
 import DayCockpit from '@/components/sales/DayCockpit';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
  * ekranın söylediği şey değişiyor ve her dakika sunucuya gitmek gereksiz.
  */
 export default async function SalesPanel() {
-  const { supabase, profile, companyId } = await getCtx();
+  const { supabase, profile, companyId, managedDepartmentIds } = await getCtx();
 
   const now = new Date();
   const today = now.toLocaleDateString('en-CA', { timeZone: TZ });
@@ -57,9 +57,16 @@ export default async function SalesPanel() {
       : Promise.resolve({ count: 0 } as any)
   ]);
 
+  // Takip "kaybedildi" kapanırken sebep seçimi için (küçük, sabit liste)
+  const { data: reasons } = companyId
+    ? await supabase.from('no_order_reasons').select('id, label')
+        .eq('company_id', companyId).eq('is_active', true).order('sort_order')
+    : { data: [] as any[] };
+
   // Taslak sayısı kabukta da gösteriliyor; cache() sayesinde burada
   // ikinci bir sorgu değil, hazır sonuç.
-  const { draftVisits } = await salesBadges(supabase, profile.id, companyId);
+  const { draftVisits } = await salesBadges(
+    supabase, profile.id, companyId, isSalesManager(profile.role, managedDepartmentIds));
 
   const stops = [...(((plan as any)?.route_stops ?? []) as any[])]
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
@@ -74,6 +81,7 @@ export default async function SalesPanel() {
       followUps={(followUps ?? []) as any}
       neglected={(neglected ?? []) as any}
       draftCount={draftVisits}
+      reasons={(reasons ?? []) as any}
       outletCount={outletCount ?? 0}
     />
   );

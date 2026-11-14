@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Check, AlertTriangle, Lock } from 'lucide-react';
 import { createQuote, updateQuote, fetchOutletPrices } from '@/app/(app)/sales/orders/actions';
 import { SalesStep } from '@/components/sales/OrdersClient';
-import { tl, BOTTLES_PER_CASE } from '@/lib/commerce-format';
+import { tl, BOTTLES_PER_CASE, bottlePriceFromCase, casePriceFromBottle } from '@/lib/commerce-format';
 
 interface OutletLite { id: string; name: string; city: string | null; district: string | null }
 interface ProductLite { id: string; name: string }
@@ -60,7 +60,8 @@ export default function QuoteForm({
       const ex = items?.find(i => i.product_id === p.id);
       m[p.id] = {
         cases: ex ? String(Math.round(ex.bottles / BOTTLES_PER_CASE)) : '',   // şişe → koli
-        price: ex ? String(ex.unit_price) : '',
+        // ekranda KOLİ fiyatı; veritabanındaki şişe fiyatı burada çevriliyor
+        price: ex ? String(casePriceFromBottle(ex.unit_price)) : '',
         discount: ex && ex.discount ? String(ex.discount) : ''
       };
     }
@@ -86,7 +87,7 @@ export default function QuoteForm({
             const serverPrice = r.prices[p.id];
             if (!next[p.id]) next[p.id] = { cases: '', price: '', discount: '' };
             if (!next[p.id].price && serverPrice !== null && serverPrice !== undefined) {
-              next[p.id] = { ...next[p.id], price: String(serverPrice) };
+              next[p.id] = { ...next[p.id], price: String(casePriceFromBottle(serverPrice)) };
             }
           }
           return next;
@@ -108,11 +109,10 @@ export default function QuoteForm({
     for (const p of products) {
       const l = lines[p.id];
       if (!l) continue;
-      // alan KOLİ tutuyor, fiyat ŞİŞE başına → çevrim burada
+      // miktar KOLİ, fiyat KOLİ başına — saha böyle konuşuyor
       const c = Number(l.cases), pr = Number(l.price), d = Number(l.discount || '0');
       if (!Number.isFinite(c) || c <= 0) continue;
-      const bottles = Math.round(c) * BOTTLES_PER_CASE;
-      sub += Math.max((Number.isFinite(pr) ? pr : 0) * bottles - (Number.isFinite(d) ? d : 0), 0);
+      sub += Math.max((Number.isFinite(pr) ? pr : 0) * Math.round(c) - (Number.isFinite(d) ? d : 0), 0);
     }
     const vat = Math.round(sub * (vatRate / 100) * 100) / 100;
     return { sub, vat, total: sub + vat };
@@ -244,8 +244,9 @@ export default function QuoteForm({
           const c = Number(l.cases) || 0;
           const pr = Number(l.price) || 0;
           const d = Number(l.discount) || 0;
-          const net = c > 0 ? Math.max(pr * c * BOTTLES_PER_CASE - d, 0) : 0;
+          const net = c > 0 ? Math.max(pr * c - d, 0) : 0;
           const agreed = prices[p.id];
+          const agreedCase = agreed !== null && agreed !== undefined ? casePriceFromBottle(agreed) : null;
           return (
             <div key={p.id} className="rounded-xl bg-white/[0.03] p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -261,11 +262,13 @@ export default function QuoteForm({
                     className="input !py-2 !text-[13px]" />
                 </div>
                 <div>
-                  <label className="label !text-[12px]">Birim TL / şişe</label>
+                  <label className="label !text-[12px]">Koli fiyatı ₺</label>
                   <input type="number" min={0} step="0.01" inputMode="decimal"
-                    name={`item_${p.id}_price`} value={l.price}
+                    value={l.price}
                     onChange={e => setLine(p.id, 'price', e.target.value)}
                     className="input !py-2 !text-[13px]" />
+                  {/* Sunucuya ŞİŞE fiyatı gider (dört ondalık) */}
+                  <input type="hidden" name={`item_${p.id}_price`} value={bottlePriceFromCase(pr) || ''} />
                 </div>
                 <div>
                   <label className="label !text-[12px]">İskonto TL</label>
@@ -278,9 +281,9 @@ export default function QuoteForm({
               {c > 0 && (
                 <p className="text-[12px] text-[#8E8E93]">
                   {c} koli = {c * BOTTLES_PER_CASE} şişe
-                  {pr > 0 ? ` · koli tutarı ${tl(pr * BOTTLES_PER_CASE)}` : ''}
-                  {agreed !== null && agreed !== undefined && pr !== agreed
-                    ? ` · geçerli fiyat ${tl(agreed)}, elle değiştirildi`
+                  {pr > 0 ? ` · şişe ${bottlePriceFromCase(pr).toFixed(2)} ₺` : ''}
+                  {agreedCase !== null && pr > 0 && Math.abs(pr - agreedCase) > 0.005
+                    ? ` · geçerli koli fiyatı ${tl(agreedCase)}, elle değiştirildi`
                     : ''}
                 </p>
               )}
@@ -293,7 +296,7 @@ export default function QuoteForm({
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
             <span>
               Fiyatı girilmemiş ürün var: {missingPrice.map(p => p.name).join(', ')}.
-              Nokta için fiyat anlaşması yapın ya da birim fiyatı elle girin.
+              Koli fiyatını elle girin; sipariş onaylanınca bu noktanın fiyatı olarak kaydedilir.
             </span>
           </p>
         )}

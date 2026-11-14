@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Truck } from 'lucide-react';
 import { updateSupplySettings } from '@/app/(app)/sales/actions';
+import { BOTTLES_PER_CASE } from '@/lib/commerce-format';
 
 /**
  * Nokta bazlı tedarik ayarları — F10 tekrar sipariş önerisinin girdileri.
@@ -34,7 +35,7 @@ export default function SupplySettings({
     const ss = Math.ceil(daily * safety);
     const need = Math.ceil(daily * (lead + nextCheck));
     const bottles = Math.max(need + ss - stock, 0);
-    return { ss, bottles, cases: Math.ceil(bottles / 12) };
+    return { ss, bottles, cases: Math.ceil(bottles / BOTTLES_PER_CASE) };
   }, [lead, safety]);
 
   async function onSubmit(fd: FormData) {
@@ -88,7 +89,7 @@ export default function SupplySettings({
 
       <div className="rounded-lg bg-white/[0.04] px-3 py-2 text-[13px] text-[#AEAEB2]">
         <span className="text-[#8E8E93]">Örnek:</span> günde 6 şişe satan, elinde 24 şişe olan bir ürün
-        için 7 gün sonraki kontrolde <strong className="text-[#F0EFEC]">{example.bottles} şişe
+        için 7 gün sonraki kontrolde <strong className="text-[#F2F2F7]">{example.bottles} şişe
         ({example.cases} koli)</strong> önerilir. Güvenlik payı {example.ss} şişe.
       </div>
 

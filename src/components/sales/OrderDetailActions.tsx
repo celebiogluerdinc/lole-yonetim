@@ -3,11 +3,11 @@
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { PackageCheck, ClipboardCheck, Truck, CheckCircle2, X } from 'lucide-react';
+import { Truck, CheckCircle2, X } from 'lucide-react';
 import {
-  confirmOrderStock, acceptOrder, setOrderStatus, linkOrderToVisit, addCommerceFollowUp
+  approveOrder, setOrderStatus, linkOrderToVisit, addCommerceFollowUp
 } from '@/app/(app)/sales/orders/actions';
-import { SalesStep, NextStepCard } from '@/components/sales/OrdersClient';
+import { NextStepCard } from '@/components/sales/OrdersClient';
 
 interface PersonLite { id: string; full_name: string }
 interface VisitLite { id: string; visit_date: string; outcome: string }
@@ -19,13 +19,16 @@ interface VisitLite { id: string; visit_date: string; outcome: string }
  * durumda TEK birincil buton ve kilitliyse NEDENİ — ardından onay/kontrol
  * ve en sonda takip.
  *
- * İki teyit ayrı ayrı: stok/sevk ve sipariş kabulü. Stok teyidi
- * verilmeden "Onayla" açılmıyor; veritabanı da reddediyor, arayüz bunu
- * önceden söylüyor.
+ * Onay TEK ADIM: stok/sevk teyidi + sipariş kabulü + "onaylı" durumu
+ * eskiden üç ayrı dokunuştu ve üçüne de aynı kişi basıyordu. Sunucu
+ * (approveOrder) üçünü birlikte yazıyor; veritabanı kuralı aynen duruyor.
+ * Sonrası iki adım: Sevk edildi → Teslim edildi.
  */
 export default function OrderDetailActions({
-  order, people, linkableVisits
+  order, people, linkableVisits, children
 }: {
+  /** Kalemler ve belge ayrıntısı: "Sıradaki adım" kartının altına girer */
+  children?: React.ReactNode;
   order: {
     id: string; outlet_id: string; status: string;
     stock_confirmed_at: string | null; stock_confirmed_by_name: string | null;
@@ -76,28 +79,15 @@ export default function OrderDetailActions({
         button: null
       };
     }
-    if (!order.stock_confirmed_at) {
-      return {
-        title: 'Stok ve sevk teyidi ver',
-        hint: 'Teyit verilmeden sipariş onaylanamaz; depo tarafı bu teyitle sevke başlar.',
-        blocked: null,
-        button: (
-          <button disabled={pending} onClick={() => run(() => confirmOrderStock(order.id))}
-            className="btn-primary">
-            <PackageCheck size={16} /> Teyit ver
-          </button>
-        )
-      };
-    }
     if (['taslak', 'onay_bekliyor'].includes(order.status)) {
       return {
         title: 'Siparişi onayla',
-        hint: 'Stok teyidi tamam. Onaydan sonra sevk adımına geçilir.',
+        hint: 'Tek dokunuş: stok/sevk teyidi ve sipariş kabulü birlikte verilir, sipariş sevke hazır olur.',
         blocked: null,
         button: (
-          <button disabled={pending} onClick={() => run(() => setOrderStatus(order.id, 'onayli'))}
+          <button disabled={pending} onClick={() => run(() => approveOrder(order.id))}
             className="btn-primary">
-            <CheckCircle2 size={16} /> Siparişi onayla
+            <CheckCircle2 size={16} /> {pending ? 'Onaylanıyor…' : 'Siparişi onayla'}
           </button>
         )
       };
@@ -161,23 +151,15 @@ export default function OrderDetailActions({
         </p>
       )}
 
-      {/* ---------- ONAY & KONTROL ---------- */}
-      <section className="card p-5 space-y-3">
-        <p className="section-title">Onay ve kontrol</p>
-        <Confirm
-          title="Stok ve Sevk Teyidi" at={order.stock_confirmed_at} by={order.stock_confirmed_by_name}
-          disabled={pending || !open} icon={<PackageCheck size={14} />}
-          onClick={() => run(() => confirmOrderStock(order.id))}
-        />
-        <Confirm
-          title="Sipariş Kabulü" at={order.order_accepted_at} by={order.order_accepted_by_name}
-          disabled={pending || !open} icon={<ClipboardCheck size={14} />}
-          onClick={() => run(() => acceptOrder(order.id))}
-        />
-        <p className="text-[12px] text-[#8E8E93]">
-          Şu an tüm departmanlar teyit verebiliyor.
+      {/* Onay izi: kim, ne zaman. Düğme yok — onay tepedeki tek adımda. */}
+      {order.order_accepted_at && (
+        <p className="text-[12.5px] text-[#8E8E93] px-1">
+          Onaylayan: {order.order_accepted_by_name ?? order.stock_confirmed_by_name ?? 'bilinmiyor'} ·{' '}
+          {new Date(order.order_accepted_at).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}
         </p>
-      </section>
+      )}
+
+      {children}
 
       {/* Ziyarete bağla — ziyaret "sipariş" sonucuyla kapanacaksa bu bağ şart */}
       {!order.visit_id && linkableVisits.length > 0 && (
@@ -204,7 +186,7 @@ export default function OrderDetailActions({
 
       {/* ---------- 5 · SONUÇ & TAKİP ---------- */}
       <section className="card p-5 space-y-3">
-        <SalesStep n={5} title="Sonuç & Takip" sub="Tek sorumlu ve son tarih" />
+        <p className="section-title">Takip</p>
         {!fupOpen ? (
           <div className="flex flex-wrap gap-2">
             <button onClick={() => setFupOpen(true)} className="btn-ghost text-sm">Takip ekle</button>
@@ -238,32 +220,6 @@ export default function OrderDetailActions({
           </form>
         )}
       </section>
-    </div>
-  );
-}
-
-function Confirm({
-  title, at, by, disabled, icon, onClick
-}: {
-  title: string; at: string | null; by: string | null;
-  disabled: boolean; icon: React.ReactNode; onClick: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.03] px-3 py-2.5">
-      <div className="min-w-0">
-        <p className="text-[14px] font-medium">{title}</p>
-        <p className="text-[12px] text-[#8E8E93]">
-          {at
-            ? `${by ?? 'bilinmeyen'} · ${new Date(at).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}`
-            : 'bekliyor'}
-        </p>
-      </div>
-      {!at && (
-        <button onClick={onClick} disabled={disabled}
-          className="btn-outline !py-1.5 !text-[13px] disabled:opacity-30">
-          {icon} Teyit ver
-        </button>
-      )}
     </div>
   );
 }

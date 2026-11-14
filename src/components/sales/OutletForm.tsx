@@ -29,6 +29,8 @@ export interface OutletFormValues {
   current_supplier?: string | null; top_selling_drink?: string | null;
   preferred_contact_time?: string | null;
   chain_decision?: string | null; status?: OutletStatus | null;
+  /** Aylık potansiyel — KOLİ (itiraz ve kayıp analizinin TL ağırlığı) */
+  potential_monthly_volume?: number | null;
 }
 
 /**
@@ -39,6 +41,12 @@ export interface OutletFormValues {
  * sıra artık her yerde aynı:
  *   1 Kim & Nerede → 2 Koşullar & fatura → 3 Ne satılıyor → 4 Durum & karar
  * Aynı sıra teklif ve sipariş formlarında da kullanılıyor.
+ *
+ * OLUŞTURMADA yalnız dört şey görünür: ad (tek zorunlu), tip, konum,
+ * telefon. Geri kalan on beş alan "Diğer bilgiler" altında katlı —
+ * sahada kapı önünde nokta açan temsilci yirmi bir alanlık form
+ * görünce ya yarım bırakıyor ya da hiç açmıyordu. Katlı alanlar da
+ * forma dahildir; doldurulursa kaydedilir. Düzenlemede hepsi açık.
  *
  * Bileşen <form> açmaz: üst bileşen kendi action'ını ve butonlarını yönetir.
  */
@@ -75,7 +83,10 @@ export default function OutletForm({
 
       {/* ---------- 1 · KİM & NEREDE ---------- */}
       <section className="space-y-3">
-        <FormStep n={1} title="Kim & Nerede" sub="Nokta kimliği, tipi ve konumu" />
+        <FormStep n={1} title="Kim & Nerede"
+          sub={mode === 'create'
+            ? 'Yalnızca nokta adı zorunlu — gerisi sonradan tamamlanabilir'
+            : 'Nokta kimliği, tipi ve konumu'} />
 
         <div>
           <label className="label">Nokta adı *</label>
@@ -135,20 +146,28 @@ export default function OutletForm({
           </div>
         </div>
 
-        <div>
-          <label className="label">Adres</label>
-          <input name="address" defaultValue={v.address ?? ''} className="input" />
-        </div>
-
         <div className="grid sm:grid-cols-2 gap-3">
           <div>
             <label className="label">Telefon</label>
             <input name="phone" type="tel" inputMode="tel" defaultValue={v.phone ?? ''} className="input" />
           </div>
           <div>
-            <label className="label">E-posta</label>
-            <input name="email" type="email" defaultValue={v.email ?? ''} className="input" />
+            <label className="label">Aylık potansiyel (koli)</label>
+            <input name="potential_monthly_cases" inputMode="decimal" className="input tabular-nums"
+              defaultValue={v.potential_monthly_volume ?? ''} placeholder="Tahmini — örn. 10" />
           </div>
+        </div>
+      </section>
+
+      <Rest fold={mode === 'create'}>
+      <section className="space-y-3">
+        <div>
+          <label className="label">Adres</label>
+          <input name="address" defaultValue={v.address ?? ''} className="input" />
+        </div>
+        <div>
+          <label className="label">E-posta</label>
+          <input name="email" type="email" defaultValue={v.email ?? ''} className="input" />
         </div>
       </section>
 
@@ -178,8 +197,8 @@ export default function OutletForm({
           </div>
         </div>
         <p className="text-[12px] text-[#8E8E93]">
-          Vergi no olmadan teklif ve sipariş kesilemez. İlk ziyarette alınamadıysa
-          sonradan bu formdan tamamlanabilir.
+          Vergi no fatura için gerekli; satışa engel değil. İlk ziyarette alınamadıysa
+          sonradan nokta kartından tamamlanır.
         </p>
       </section>
 
@@ -243,14 +262,33 @@ export default function OutletForm({
             </select>
           </div>
         </div>
-        {mode === 'create' && (
-          <p className="text-[13px] text-[#8E8E93]">
-            Kaydedince noktanın kartı hemen açılır. Sıradaki adımlar aynı karttan yürür:
-            aday değerlendirmesi → ziyaret → teklif → sipariş.
-          </p>
-        )}
       </section>
+      </Rest>
+
+      {mode === 'create' && (
+        <p className="text-[13px] text-[#8E8E93]">
+          Kaydedince noktanın kartı açılır; ziyaret, doğrudan satış ve teklif aynı karttan yürür.
+        </p>
+      )}
     </div>
+  );
+}
+
+/**
+ * Oluşturmada isteğe bağlı alanları katlar; düzenlemede olduğu gibi gösterir.
+ * Katlı <details> içindeki alanlar da forma dahildir — kapalı olması
+ * gönderilmesini engellemez.
+ */
+function Rest({ fold, children }: { fold: boolean; children: React.ReactNode }) {
+  if (!fold) return <>{children}</>;
+  return (
+    <details className="rounded-xl border border-white/10 px-3.5 py-2">
+      <summary className="cursor-pointer list-none min-h-[44px] flex items-center justify-between gap-3">
+        <span className="text-[14px] font-semibold">Diğer bilgiler</span>
+        <span className="text-[12px] text-[#8E8E93]">adres, fatura, muhatap — isteğe bağlı</span>
+      </summary>
+      <div className="space-y-6 pt-3 pb-2">{children}</div>
+    </details>
   );
 }
 

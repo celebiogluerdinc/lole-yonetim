@@ -5,11 +5,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Plus, Check, Clock, MapPin, AlertTriangle, Sparkles, Lock,
-  ChevronRight, FileWarning, ArrowRight
+  ChevronRight, FileWarning, ArrowRight, Zap
 } from 'lucide-react';
 import { fmtDate } from '@/lib/utils';
 import { OUTCOME_LABEL, OUTCOME_COLOR, SEGMENT_COLOR } from '@/lib/sales-types';
 import { addOutletsToDay, seedDayRoute } from '@/app/(app)/sales/routes/actions';
+import FollowUpClose from '@/components/sales/FollowUpClose';
 
 /* ------------------------------------------------------------------ *
  * BUGÜN — saha temsilcisinin gün yönetim ekranı
@@ -58,7 +59,8 @@ interface Neglected {
 }
 
 export default function DayCockpit({
-  today, serverNowMin, plan, stops, visits, followUps, neglected, draftCount, outletCount
+  today, serverNowMin, plan, stops, visits, followUps, neglected, draftCount, outletCount,
+  reasons = []
 }: {
   today: string;
   serverNowMin: number;
@@ -69,8 +71,12 @@ export default function DayCockpit({
   neglected: Neglected[];
   draftCount: number;
   outletCount: number;
+  /** İtiraz nedenleri — takip "kaybedildi" kapanırken sebep seçimi için */
+  reasons?: { id: string; label: string }[];
 }) {
   const router = useRouter();
+  // Yerinde kapatılan takip (tek seferde bir tane açık)
+  const [closingId, setClosingId] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -300,11 +306,17 @@ export default function DayCockpit({
             <Sparkles size={16} /> {pending ? 'Hazırlanıyor…' : primary.cta}
           </button>
         )}
-        {!plan && (
-          <Link href="/sales/routes" className="btn-ghost w-full justify-center !text-[13px]">
-            Rotayı elle kurmak istiyorum
+        {/* Günün en değerli işi tek dokunuş uzakta: sahada satış çıktığı an
+            menü aramadan kaydedilebilsin. */}
+        <div className="grid grid-cols-2 gap-2">
+          <Link href="/sales/orders/direct/new" className="btn-outline justify-center !text-[14px]">
+            <Zap size={15} /> Doğrudan satış
           </Link>
-        )}
+          <Link href={plan ? '/sales/outlets' : '/sales/routes'}
+            className="btn-ghost justify-center !text-[14px]">
+            {plan ? 'Noktalar' : 'Rotayı elle kur'}
+          </Link>
+        </div>
       </section>
 
       {/* ---------- HEDEF + KALAN SÜRE ---------- */}
@@ -337,17 +349,6 @@ export default function DayCockpit({
               pct >= 100 ? 'bg-ios-green' : pct >= 60 ? 'bg-ios-blue' : 'bg-ios-orange'}`}
               style={{ width: `${pct}%` }} />
           </div>
-          <div className="flex flex-wrap gap-1.5 text-[12px] pt-1">
-            <span className="badge bg-white/[0.07] text-[#D1D1D6]">Durak {stops.length}</span>
-            <span className="badge bg-emerald-500/20 text-emerald-300">Gerçekleşen {doneStops}</span>
-            {pendingStops.length > 0 && (
-              <span className="badge bg-white/10 text-[#8E8E93]">Bekleyen {pendingStops.length}</span>
-            )}
-            {lateStops.length > 0 && (
-              <span className="badge bg-rose-500/20 text-rose-300">Saati geçen {lateStops.length}</span>
-            )}
-            {orders > 0 && <span className="badge bg-ios-blue/20 text-ios-blue">Sipariş {orders}</span>}
-          </div>
         </section>
       )}
 
@@ -362,31 +363,51 @@ export default function DayCockpit({
               : `Bugün vadesi gelen ${todayFups.length} takip`}
           </p>
           <p className="px-5 pb-2 text-[13px] text-[#8E8E93]">
-            Söz verilmiş iş. Noktayı bugünün rotasına tek dokunuşla ekleyebilirsiniz.
+            Söz verilmiş iş. Yapıldıysa buradan kapatın; yapılacaksa noktayı bugünün rotasına ekleyin.
           </p>
           <div className="divide-y divide-white/[0.08]">
             {[...overdueFups, ...todayFups].slice(0, 8).map(f => {
               const inRoute = stops.some(s => s.outlet_id && s.outlet_id === f.outlet_id);
               return (
-                <div key={f.id} className="flex items-center gap-3 px-5 py-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[15px] truncate">{f.action}</p>
-                    <p className="text-[13px] text-[#8E8E93] truncate">
-                      {f.outlets?.name ?? '—'} · {fmtDate(f.due_date, false)}
-                    </p>
+                <div key={f.id} className="px-5 py-3 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[15px] truncate">{f.action}</p>
+                      <p className="text-[13px] text-[#8E8E93] truncate">
+                        {f.outlets?.id
+                          ? <Link href={`/sales/outlets/${f.outlets.id}`} className="hover:underline">{f.outlets.name}</Link>
+                          : '—'}
+                        {' · '}{fmtDate(f.due_date, false)}
+                      </p>
+                    </div>
+                    {f.due_date < today && (
+                      <span className="badge bg-rose-500/20 text-rose-300 shrink-0">gecikmiş</span>
+                    )}
+                    {inRoute && (
+                      <span className="badge bg-emerald-500/20 text-emerald-300 shrink-0">rotada</span>
+                    )}
                   </div>
-                  {f.due_date < today && (
-                    <span className="badge bg-rose-500/20 text-rose-300 shrink-0">gecikmiş</span>
-                  )}
-                  {f.outlet_id && (
-                    inRoute
-                      ? <span className="badge bg-emerald-500/20 text-emerald-300 shrink-0">rotada</span>
-                      : <button
+
+                  {closingId === f.id ? (
+                    <FollowUpClose id={f.id} reasons={reasons}
+                      onCancel={() => setClosingId(null)}
+                      onDone={() => { setClosingId(null); setMsg('Takip kapatıldı.'); }} />
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {/* Söz verilen iş yapıldıysa görüldüğü yerde kapansın */}
+                      <button onClick={() => setClosingId(f.id)}
+                        className="min-h-[44px] rounded-lg bg-emerald-500/15 text-emerald-300 px-3.5 text-[13.5px] font-semibold flex items-center gap-1.5">
+                        <Check size={15} /> Kapat
+                      </button>
+                      {f.outlet_id && !inRoute && (
+                        <button
                           onClick={() => run(() => addOutletsToDay([f.outlet_id!], today), () => 'Rotaya eklendi.')}
                           disabled={pending}
-                          className="rounded-lg bg-ios-blue/15 text-ios-blue px-2.5 py-1.5 text-[12px] font-semibold shrink-0">
+                          className="min-h-[44px] rounded-lg bg-ios-blue/15 text-ios-blue px-3.5 text-[13.5px] font-semibold">
                           Bugüne ekle
                         </button>
+                      )}
+                    </div>
                   )}
                 </div>
               );
@@ -443,14 +464,14 @@ export default function DayCockpit({
                       {s.status === 'planlandi' && (
                         s.outlet_id ? (
                           <Link href={`/sales/visits/new?outlet=${s.outlet_id}`}
-                            className={`rounded-lg px-2.5 py-1.5 text-[12px] font-semibold shrink-0 ${
+                            className={`min-h-[44px] flex items-center rounded-lg px-3.5 text-[13.5px] font-semibold shrink-0 ${
                               late ? 'bg-ios-red text-white' : 'bg-ios-blue/15 text-ios-blue'}`}>
                             {late ? 'Gecikti · aç' : 'Ziyareti aç'}
                           </Link>
                         ) : (
                           /* Potansiyel durak: nokta kaydı Rota ekranında açılıyor */
                           <Link href="/sales/routes"
-                            className="rounded-lg px-2.5 py-1.5 text-[12px] font-semibold shrink-0 bg-amber-500/15 text-amber-300">
+                            className="min-h-[44px] flex items-center rounded-lg px-3.5 text-[13.5px] font-semibold shrink-0 bg-amber-500/15 text-amber-300">
                             Potansiyel
                           </Link>
                         )
@@ -507,7 +528,7 @@ export default function DayCockpit({
         </p>
       )}
 
-      <p className="text-[12px] text-[#48484A] px-1">
+      <p className="text-[12px] text-[#8E8E93] px-1">
         {outletCount} aktif nokta · kartotekse eklemek için Noktalar sekmesi
       </p>
     </main>

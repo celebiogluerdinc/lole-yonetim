@@ -20,6 +20,26 @@ export function casesOf(bottles: number | null | undefined): string {
   return Number.isInteger(c) ? String(c) : c.toFixed(2);
 }
 
+/**
+ * Koli fiyatı → şişe fiyatı (dört ondalık).
+ *
+ * Saha "koli 700" diye konuşur, veritabanı şişe fiyatı tutar. Dört
+ * ondalık şart: 700/12 = 58,3333; iki ondalıkta kolide 4 kuruş kaybolur.
+ * Çevrim yalnız bu iki fonksiyonda — ekranlar kendi başına bölmez.
+ */
+export function bottlePriceFromCase(casePrice: number | null | undefined): number {
+  const c = Number(casePrice ?? 0);
+  if (!Number.isFinite(c) || c <= 0) return 0;
+  return Math.round((c / BOTTLES_PER_CASE) * 10000) / 10000;
+}
+
+/** Şişe fiyatı → koli fiyatı (iki ondalık). 58,3333 × 12 = 700,00. */
+export function casePriceFromBottle(bottlePrice: number | null | undefined): number {
+  const b = Number(bottlePrice ?? 0);
+  if (!Number.isFinite(b) || b <= 0) return 0;
+  return Math.round(b * BOTTLES_PER_CASE * 100) / 100;
+}
+
 /** Tutarı Türk Lirası biçiminde gösterir. */
 export function tl(n: number | null | undefined): string {
   if (n === null || n === undefined) return '—';

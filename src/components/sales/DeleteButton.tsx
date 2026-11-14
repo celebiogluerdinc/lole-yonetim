@@ -40,8 +40,33 @@ export default function DeleteButton({
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
+  // Sebep sorulan silmelerde kendi panelimizi açıyoruz. Eskiden tarayıcının
+  // window.prompt kutusu çıkıyordu: telefonda klavyeyle birlikte ekranın
+  // yarısını kaplıyor, uygulamanın diline uymuyor ve PWA'da bazen hiç
+  // açılmıyordu.
+  const [sheet, setSheet] = useState(false);
+  const [reason, setReason] = useState('');
+
+  function fire(r?: string) {
+    start(async () => {
+      let res: any;
+      try {
+        res = await action(r);
+      } catch (e: any) {
+        setErr(`Beklenmeyen hata: ${e?.message ?? 'bilinmiyor'}`);
+        return;
+      }
+      setSheet(false);
+      if (res?.error) { setErr(res.error); return; }
+      if (res?.blocked) { setNote(res.message ?? 'Kayıt silinemedi.'); router.refresh(); return; }
+      if (redirectTo) router.push(redirectTo);
+      router.refresh();
+    });
+  }
+
   async function onClick() {
     setErr(null); setNote(null);
+    if (askReason) { setReason(''); setSheet(true); return; }
     const ok = await confirm({
       title: title ?? 'Silinsin mi?',
       message,
@@ -49,27 +74,7 @@ export default function DeleteButton({
       danger: true
     });
     if (!ok) return;
-
-    let reason: string | undefined;
-    if (askReason) {
-      const r = window.prompt('Silme sebebi (denetim kaydına yazılır):', '');
-      if (r === null) return;                       // vazgeçti
-      reason = r.trim() || undefined;
-    }
-
-    start(async () => {
-      let r: any;
-      try {
-        r = await action(reason);
-      } catch (e: any) {
-        setErr(`Beklenmeyen hata: ${e?.message ?? 'bilinmiyor'}`);
-        return;
-      }
-      if (r?.error) { setErr(r.error); return; }
-      if (r?.blocked) { setNote(r.message ?? 'Kayıt silinemedi.'); router.refresh(); return; }
-      if (redirectTo) router.push(redirectTo);
-      router.refresh();
-    });
+    fire();
   }
 
   return (
@@ -84,6 +89,25 @@ export default function DeleteButton({
                  : <Trash2 size={size === 'md' ? 15 : 13} />}
         {label}
       </button>
+      {sheet && (
+        <span className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/40 p-3"
+          onClick={() => !pending && setSheet(false)}>
+          <span className="card w-full max-w-md p-5 space-y-3 block" onClick={e => e.stopPropagation()}>
+            <span className="block text-[17px] font-semibold">{title ?? 'Silinsin mi?'}</span>
+            <span className="block text-[13.5px] text-[#8E8E93]">{message}</span>
+            <input value={reason} onChange={e => setReason(e.target.value)} autoFocus
+              className="input" placeholder="Silme sebebi (isteğe bağlı — denetim kaydına yazılır)" />
+            <span className="flex gap-2">
+              <button type="button" disabled={pending} onClick={() => fire(reason.trim() || undefined)}
+                className="btn-danger min-h-[44px] disabled:opacity-40">
+                <Trash2 size={15} /> {pending ? 'Siliniyor…' : 'Sil'}
+              </button>
+              <button type="button" disabled={pending} onClick={() => setSheet(false)}
+                className="btn-ghost min-h-[44px]">Vazgeç</button>
+            </span>
+          </span>
+        </span>
+      )}
       {err && <span className="text-[12px] text-ios-red max-w-[34ch]">{err}</span>}
       {note && <span className="text-[12px] text-amber-300 max-w-[42ch]">{note}</span>}
     </span>

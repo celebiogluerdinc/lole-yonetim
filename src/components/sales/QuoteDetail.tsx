@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ShieldCheck, Undo2, Send, X, Pencil } from 'lucide-react';
+import { ShieldCheck, Send, X, Pencil, Package } from 'lucide-react';
 import {
-  checkQuote, undoQuoteCheck, setQuoteStatus, addCommerceFollowUp
+  approveQuote, setQuoteStatus, addCommerceFollowUp
 } from '@/app/(app)/sales/orders/actions';
 import { SalesStep, NextStepCard } from '@/components/sales/OrdersClient';
-import { tl, casesOf, type QuoteStatus } from '@/lib/commerce-format';
+import { tl, casesOf, casePriceFromBottle, type QuoteStatus } from '@/lib/commerce-format';
 import OrderFromQuote from '@/components/sales/OrderFromQuote';
 import PrintButton from '@/components/sales/PrintButton';
 import { QuoteDeleteButton } from '@/components/sales/DocDeleteButtons';
@@ -24,9 +24,10 @@ interface PersonLite { id: string; full_name: string }
  * buton ve buton kilitliyse NEDENİ. Temsilcinin ekrana bakıp "şimdi ne
  * yapacağım" diye düşünmesi gerekmiyor.
  *
- * İki ayrı kontrol — mali ve satış. İkisi tamamlanmadan "Onayla"
- * açılmıyor; veritabanı da zaten reddediyor, arayüz bunu önceden
- * gösteriyor ki kullanıcı duvara toslamasın.
+ * Onay TEK ADIM. Eskiden mali ve satış kontrolü iki ayrı düğmeydi ve
+ * ikisine de aynı kişi basıyordu; teklif → sipariş dokuz dokunuş
+ * sürüyordu. Artık: Onayla → Siparişe çevir. Liste altı fiyatta onayı
+ * yalnız admin/müdür verebilir (kural sunucuda).
  */
 export default function QuoteDetail({
   quote, lines, people, financeName, salesName, canConvert, hasOrder, expired, orderProps
@@ -63,10 +64,15 @@ export default function QuoteDetail({
   const [rejectText, setRejectText] = useState('');
   const [fupOpen, setFupOpen] = useState(false);
   const [convertOpen, setConvertOpen] = useState(false);
+  const convertRef = useRef<HTMLElement | null>(null);
+  // Form sayfanın altında açılıyor; kullanıcı düğmeye basıp hiçbir şey
+  // olmadığını sanmasın diye görünür alana getiriyoruz.
+  useEffect(() => {
+    if (convertOpen) convertRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [convertOpen]);
 
-  const bothChecked = !!quote.finance_checked_at && !!quote.sales_checked_at;
   const editable = ['taslak', 'kontrolde'].includes(quote.status);
-  const checks = (quote.finance_checked_at ? 1 : 0) + (quote.sales_checked_at ? 1 : 0);
+  const [note, setNote] = useState<string | null>(null);
 
   function run(fn: () => Promise<any>) {
     setErr(null);
@@ -82,71 +88,68 @@ export default function QuoteDetail({
     });
   }
 
+  /**
+   * Tek adımda onay. Sunucu iki kontrol damgasını birlikte yazıyor;
+   * fiyat listenin altındaysa onayı yalnız admin/müdür verebiliyor ve
+   * bunu burada not olarak gösteriyoruz.
+   */
+  function approve() {
+    setErr(null); setNote(null);
+    start(async () => {
+      try {
+        const r: any = await approveQuote(quote.id);
+        if (r?.error) { setErr(r.error); return; }
+        if (r?.belowList) setNote('Liste fiyatının altında bir kalem var — onay yönetici yetkisiyle verildi.');
+        router.refresh();
+      } catch {
+        setErr('İşlem tamamlanamadı. Sayfayı yenileyip tekrar deneyin.');
+      }
+    });
+  }
+
   // ---- Sıradaki adım: tek birincil buton, duruma göre ----
+  // Akış kısaldı: Onayla → Siparişe çevir. "Sunuldu" ve "Kabul edildi"
+  // ara durakları zorunlu değil; müşteri evet dediyse doğrudan siparişe
+  // çevrilir, teklif kendiliğinden "kabul" olur.
   const nextStep = (() => {
-    if (editable && !bothChecked) {
+    if (hasOrder) {
       return {
-        title: `Kontroller tamamlanmalı (${checks}/2)`,
-        hint: 'Mali kontrol ve satış kontrolü verilmeden teklif onaylanamaz. Tüm departmanlar kontrol verebilir.',
+        title: 'Siparişi takip et',
+        hint: 'Bu teklifin siparişi oluşturuldu — onay ve sevk sipariş kartından yürür.',
         blocked: null as string | null,
         button: null as React.ReactNode
       };
     }
-    if (editable && bothChecked) {
+    if (editable) {
       return {
         title: 'Teklifi onayla',
-        hint: 'İki kontrol tamam. Onaylanan teklif müşteriye sunulabilir.',
+        hint: 'Tek dokunuş. Onaylanan teklif müşteriye sunulur ve siparişe çevrilebilir.',
         blocked: null,
         button: (
-          <button disabled={pending} onClick={() => run(() => setQuoteStatus(quote.id, 'onayli'))}
-            className="btn-primary">
-            <ShieldCheck size={16} /> Onayla
+          <button disabled={pending} onClick={approve} className="btn-primary">
+            <ShieldCheck size={16} /> {pending ? 'Onaylanıyor…' : 'Teklifi onayla'}
           </button>
         )
       };
     }
-    if (quote.status === 'onayli') {
-      return {
-        title: 'Müşteriye sun',
-        hint: 'Sunumdan sonra müşterinin yanıtını bu karttan işleyin.',
-        blocked: expired ? 'Geçerlilik tarihi geçmiş — sunmadan önce tarihi güncelleyin.' : null,
-        button: (
-          <button disabled={pending} onClick={() => run(() => setQuoteStatus(quote.id, 'sunuldu'))}
-            className="btn-primary">
-            <Send size={16} /> Müşteriye sunuldu
-          </button>
-        )
-      };
-    }
-    if (quote.status === 'sunuldu') {
-      return {
-        title: 'Müşteri yanıtını işle',
-        hint: 'Kabul edildiyse siparişe çevirin; olmadıysa ret sebebini kaydedin.',
-        blocked: expired ? 'Geçerlilik tarihi geçmiş — yeni teklif gerekebilir.' : null,
-        button: (
-          <button disabled={pending} onClick={() => run(() => setQuoteStatus(quote.id, 'kabul'))}
-            className="btn-primary">
-            <ShieldCheck size={16} /> Kabul edildi
-          </button>
-        )
-      };
-    }
-    if (quote.status === 'kabul' && !hasOrder) {
+    if (['onayli', 'sunuldu', 'kabul'].includes(quote.status)) {
       return {
         title: 'Siparişe çevir',
-        hint: 'Kalemler teklifin kendisinden ön dolu gelir; yalnızca teslimat bilgisini girmeniz yeterli.',
-        blocked: null,
+        hint: 'Müşteri kabul ettiyse siparişe çevirin: kalemler ve koli fiyatı tekliften hazır gelir.',
+        blocked: expired ? 'Geçerlilik tarihi geçmiş — fiyatı müşteriyle yeniden teyit edin.' : null,
         button: (
-          <button onClick={() => setConvertOpen(true)} className="btn-primary">Siparişe çevir</button>
+          <>
+            <button onClick={() => setConvertOpen(true)} className="btn-primary">
+              <Package size={16} /> Siparişe çevir
+            </button>
+            {quote.status === 'onayli' && (
+              <button disabled={pending} onClick={() => run(() => setQuoteStatus(quote.id, 'sunuldu'))}
+                className="btn-ghost">
+                <Send size={15} /> Sunuldu, yanıt bekleniyor
+              </button>
+            )}
+          </>
         )
-      };
-    }
-    if (hasOrder) {
-      return {
-        title: 'Siparişi takip et',
-        hint: 'Bu teklifin siparişi oluşturuldu — stok teyidi ve sevk oradan yürür.',
-        blocked: null,
-        button: null
       };
     }
     return {
@@ -164,6 +167,11 @@ export default function QuoteDetail({
   return (
     <div id="print-area" className="space-y-5">
       {err && <p className="alert-error">{err}</p>}
+      {note && (
+        <p className="text-[13px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
+          {note}
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-2" data-noprint>
         <PrintButton label="Teklifi yazdır" />
@@ -172,7 +180,7 @@ export default function QuoteDetail({
 
       <NextStepCard title={nextStep.title} hint={nextStep.hint} blocked={nextStep.blocked}>
         {nextStep.button}
-        {['onayli', 'sunuldu'].includes(quote.status) && (
+        {['onayli', 'sunuldu'].includes(quote.status) && !hasOrder && (
           <button disabled={pending} onClick={() => setRejectOpen(v => !v)} className="btn-ghost">
             <X size={15} /> Reddedildi
           </button>
@@ -213,7 +221,8 @@ export default function QuoteDetail({
             <div className="min-w-0">
               <p className="font-medium truncate">{l.product_name}</p>
               <p className="text-[12px] text-[#8E8E93]">
-                {casesOf(l.bottles)} koli ({l.bottles} şişe) × {tl(l.unit_price)}
+                {casesOf(l.bottles)} koli × {tl(casePriceFromBottle(l.unit_price))}
+                <span className="text-[#AEAEB2]"> · {l.bottles} şişe</span>
                 {l.discount > 0 ? ` − ${tl(l.discount)} iskonto` : ''}
               </p>
             </div>
@@ -248,40 +257,18 @@ export default function QuoteDetail({
         </div>
       </section>
 
-      {/* ---------- ONAY & KONTROL ---------- */}
-      <section className="card p-5 space-y-3">
-        <p className="section-title">Onay ve kontrol</p>
-        <p className="text-[12px] text-[#8E8E93]">
-          Müşteriye sunulmadan önce iki kontrol tamamlanmalı. Şu an tüm departmanlar onaylayabiliyor.
+      {/* Onay izi: kim, ne zaman. Düğme yok — onay tepedeki tek adımda. */}
+      {quote.finance_checked_at && (
+        <p className="text-[12.5px] text-[#8E8E93] px-1">
+          Onaylayan: {financeName ?? salesName ?? 'bilinmiyor'} ·{' '}
+          {new Date(quote.finance_checked_at).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}
         </p>
-
-        <CheckRow
-          title="Mali Kontrol" at={quote.finance_checked_at} by={financeName}
-          disabled={pending || !editable}
-          onCheck={() => run(() => checkQuote(quote.id, 'mali_kontrol'))}
-          onUndo={() => run(() => undoQuoteCheck(quote.id, 'mali_kontrol'))}
-        />
-        <CheckRow
-          title="Satış Kontrolü" at={quote.sales_checked_at} by={salesName}
-          disabled={pending || !editable}
-          onCheck={() => run(() => checkQuote(quote.id, 'satis_kontrolu'))}
-          onUndo={() => run(() => undoQuoteCheck(quote.id, 'satis_kontrolu'))}
-        />
-        {!editable && (
-          <p className="text-[12px] text-[#8E8E93]">
-            Teklif taslak aşamasını geçtiği için kontroller artık değiştirilemiyor.
-          </p>
-        )}
-      </section>
+      )}
 
       {/* ---------- SİPARİŞE ÇEVİR ---------- */}
-      {canConvert && (
-        <section className="card p-5 space-y-3">
+      {canConvert && convertOpen && (
+        <section ref={convertRef} className="card p-5 space-y-3 scroll-mt-24">
           <p className="section-title">Sipariş</p>
-          <p className="text-[13px] text-[#8E8E93]">
-            Bu teklif siparişe çevrilebilir. Sipariş, teklifin kalemleriyle ön dolu gelir —
-            koli adetleri aynı sırada, aynı birimde.
-          </p>
           <OrderFromQuote
             quoteId={quote.id}
             outletName={quote.outlet_name}
@@ -292,7 +279,7 @@ export default function QuoteDetail({
             batches={orderProps.batches}
             people={people}
             defaults={orderProps.defaults}
-            openInitially={convertOpen}
+            openInitially
           />
         </section>
       )}
@@ -332,36 +319,6 @@ export default function QuoteDetail({
   );
 }
 
-function CheckRow({
-  title, at, by, disabled, onCheck, onUndo
-}: {
-  title: string; at: string | null; by: string | null;
-  disabled: boolean; onCheck: () => void; onUndo: () => void;
-}) {
-  const done = !!at;
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.03] px-3 py-2.5">
-      <div className="min-w-0">
-        <p className="text-[14px] font-medium">{title}</p>
-        <p className="text-[12px] text-[#8E8E93]">
-          {done
-            ? `${by ?? 'bilinmeyen'} · ${new Date(at!).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}`
-            : 'bekliyor'}
-        </p>
-      </div>
-      {done ? (
-        <button onClick={onUndo} disabled={disabled} className="btn-ghost !py-1.5 !text-[13px] disabled:opacity-30">
-          <Undo2 size={14} /> Geri al
-        </button>
-      ) : (
-        <button onClick={onCheck} disabled={disabled} className="btn-outline !py-1.5 !text-[13px] disabled:opacity-30">
-          <ShieldCheck size={14} /> Kontrol et
-        </button>
-      )}
-    </div>
-  );
-}
-
 function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -375,7 +332,7 @@ function Field({ label, value }: { label: string; value: string | null }) {
   return (
     <p className="flex gap-2">
       <span className="text-[#8E8E93] shrink-0">{label}:</span>
-      <span className={value ? '' : 'text-[#48484A]'}>{value || '—'}</span>
+      <span className={value ? '' : 'text-[#AEAEB2]'}>{value || '—'}</span>
     </p>
   );
 }

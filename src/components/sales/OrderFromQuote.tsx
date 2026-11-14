@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Package } from 'lucide-react';
 import { createOrderFromQuote } from '@/app/(app)/sales/orders/actions';
 import { SalesStep } from '@/components/sales/OrdersClient';
-import { tl, BOTTLES_PER_CASE } from '@/lib/commerce-format';
+import { tl, BOTTLES_PER_CASE, bottlePriceFromCase, casePriceFromBottle } from '@/lib/commerce-format';
 
 interface QuoteLine { product_id: string; product_name: string; bottles: number; unit_price: number }
 interface BatchLite { id: string; product_id: string; batch_no: string; expiry_date: string | null }
@@ -52,7 +52,8 @@ export default function OrderFromQuote({
       {
         paidCases: String(Math.round(l.bottles / BOTTLES_PER_CASE)),
         freeCases: '0',
-        price: String(l.unit_price)
+        // ekranda KOLİ fiyatı
+        price: String(casePriceFromBottle(l.unit_price))
       }
     ]))
   );
@@ -61,7 +62,7 @@ export default function OrderFromQuote({
     const r = rows[l.product_id];
     if (!r) return sum;
     const paidCases = Number(r.paidCases) || 0, price = Number(r.price) || 0;
-    return sum + paidCases * BOTTLES_PER_CASE * price;
+    return sum + paidCases * price;
   }, 0), [rows, lines]);
 
   const freeCasesTotal = useMemo(
@@ -135,7 +136,7 @@ export default function OrderFromQuote({
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[15px] font-medium">{l.product_name}</p>
                 <span className="text-[13px] text-[#AEAEB2] tabular-nums">
-                  {tl(paidCases * BOTTLES_PER_CASE * price)}
+                  {tl(paidCases * price)}
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-2">
@@ -154,16 +155,18 @@ export default function OrderFromQuote({
                     className="input !py-2 !text-[13px]" />
                 </div>
                 <div>
-                  <label className="label !text-[12px]">Birim TL / şişe</label>
+                  <label className="label !text-[12px]">Koli fiyatı ₺</label>
                   <input type="number" min={0} step="0.01" inputMode="decimal"
-                    name={`oi_${l.product_id}_price`} value={r.price}
+                    value={r.price}
                     onChange={e => setRow(l.product_id, 'price', e.target.value)}
                     className="input !py-2 !text-[13px]" />
+                  {/* Sunucuya ŞİŞE fiyatı gider (dört ondalık) */}
+                  <input type="hidden" name={`oi_${l.product_id}_price`} value={bottlePriceFromCase(price) || ''} />
                 </div>
               </div>
               {pBatches.length > 0 && (
                 <div>
-                  <label className="label !text-[12px]">Parti (depo kaydı · istege bağlı)</label>
+                  <label className="label !text-[12px]">Parti (depo kaydı · isteğe bağlı)</label>
                   <select name={`oi_${l.product_id}_batch`} className="input !py-2 !text-[13px]" defaultValue="">
                     <option value="">Seçilmedi</option>
                     {pBatches.map(b => (
@@ -259,8 +262,8 @@ export default function OrderFromQuote({
           </div>
         </div>
         <p className="text-[13px] text-[#8E8E93]">
-          Sipariş <strong>taslak</strong> olarak açılır. Stok ve sevk teyidi verilmeden onaylanamaz —
-          teyit sipariş kartından verilir.
+          Sipariş onay bekleyenler listesine düşer; onay tek düğmeyle sipariş kartından verilir.
+          Anlaşılan koli fiyatı bu noktanın fiyatı olarak kaydedilir.
         </p>
       </div>
 

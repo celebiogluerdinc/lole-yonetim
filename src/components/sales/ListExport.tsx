@@ -64,7 +64,7 @@ export default function ListExport<T>({
         </button>
       )}
 
-      <span className="text-[12px] text-[#6E6E73] tabular-nums">{n} satır</span>
+      <span className="text-[12px] text-[#8E8E93] tabular-nums">{n} satır</span>
     </div>
   );
 }

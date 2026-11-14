@@ -1,13 +1,14 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, Search, ChevronRight, FileText, Package, AlertTriangle, X, Zap } from 'lucide-react';
+import { Plus, Search, ChevronRight, FileText, Package, AlertTriangle, X, Zap, CheckCircle2 } from 'lucide-react';
 import {
   tl, QUOTE_STATUS_LABEL, QUOTE_STATUS_COLOR, ORDER_STATUS_LABEL, ORDER_STATUS_COLOR,
   QUOTE_CLOSED, ORDER_CLOSED, type QuoteStatus, type OrderStatus
 } from '@/lib/commerce-format';
-import { deleteQuote, deleteOrder } from '@/app/(app)/sales/orders/actions';
+import { deleteQuote, deleteOrder, approveOrder } from '@/app/(app)/sales/orders/actions';
 import DeleteButton from '@/components/sales/DeleteButton';
 import ListExport from '@/components/sales/ListExport';
 
@@ -81,6 +82,8 @@ interface OrderRow {
   total_amount: number; delivery_date: string | null; created_at: string;
   stock_confirmed_at: string | null;
   outlets: { name: string; district: string | null } | null;
+  /** Kaynak teklif: is_verbal ise sipariş doğrudan satıştan gelmiştir */
+  quotes?: { is_verbal: boolean | null } | null;
 }
 
 const tr = (s: string) => s.toLocaleLowerCase('tr-TR');
@@ -90,7 +93,7 @@ const fmtD = (iso: string | null) =>
 /** Teklif listesi filtreleri — noktalar ekranındaki pillerle aynı dil. */
 const QUOTE_FILTERS = [
   { key: 'acik', label: 'Açık' },
-  { key: 'kontrol', label: 'Kontrol bekleyen' },
+  { key: 'kontrol', label: 'Onay bekleyen' },
   { key: 'onayli', label: 'Onaylı' },
   { key: 'kapali', label: 'Kapanmış' },
   { key: 'tum', label: 'Tümü' }
@@ -99,7 +102,7 @@ type QuoteFilter = typeof QUOTE_FILTERS[number]['key'];
 
 const ORDER_FILTERS = [
   { key: 'acik', label: 'Açık' },
-  { key: 'teyit', label: 'Teyit bekleyen' },
+  { key: 'teyit', label: 'Onay bekleyen' },
   { key: 'yolda', label: 'Yolda' },
   { key: 'kapali', label: 'Kapanmış' },
   { key: 'tum', label: 'Tümü' }
@@ -108,21 +111,19 @@ type OrderFilter = typeof ORDER_FILTERS[number]['key'];
 
 /** Belgenin sıradaki adımı — listede tek satır olarak gösteriliyor. */
 function quoteNext(x: QuoteRow, todayIso: string): string {
-  const checks = (x.finance_checked_at ? 1 : 0) + (x.sales_checked_at ? 1 : 0);
-  if (['taslak', 'kontrolde'].includes(x.status)) {
-    return checks < 2 ? `kontrol ${checks}/2 — tamamlanmalı` : 'onaylanmaya hazır';
-  }
-  if (x.status === 'onayli') return 'müşteriye sunulmalı';
-  if (x.status === 'sunuldu') {
-    return x.valid_until && x.valid_until < todayIso ? 'süresi geçti — yenile' : 'müşteri yanıtı bekleniyor';
+  if (['taslak', 'kontrolde'].includes(x.status)) return 'onaylanmalı';
+  if (['onayli', 'sunuldu'].includes(x.status)) {
+    return x.valid_until && x.valid_until < todayIso
+      ? 'süresi geçti — fiyatı teyit et' : 'müşteri kabul ederse siparişe çevir';
   }
   if (x.status === 'kabul') return 'siparişe çevrilmeli';
   return '';
 }
 
+const ORDER_PENDING = ['taslak', 'onay_bekliyor'];
+
 function orderNext(x: OrderRow): string {
-  if (!x.stock_confirmed_at && !ORDER_CLOSED.includes(x.status)) return 'stok ve sevk teyidi bekliyor';
-  if (['taslak', 'onay_bekliyor'].includes(x.status)) return 'onaylanmaya hazır';
+  if (ORDER_PENDING.includes(x.status)) return 'onay bekliyor';
   if (x.status === 'onayli') return 'sevk edilmeli';
   if (x.status === 'sevk_edildi') return 'teslim teyidi bekliyor';
   return '';
@@ -138,14 +139,33 @@ export default function OrdersClient({
   outletName?: string | null;
   initialTab?: 'quotes' | 'orders';
 }) {
-  const [tab, setTab] = useState<'quotes' | 'orders'>(initialTab ?? 'quotes');
+  const router = useRouter();
+  const [busy, start] = useTransition();
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actErr, setActErr] = useState<string | null>(null);
+  const [tab, setTab] = useState<'quotes' | 'orders'>(initialTab ?? 'orders');
+
+  /** Listeden tek dokunuşla onay — kartı açıp geri dönmeye gerek yok. */
+  function quickApprove(id: string) {
+    setActErr(null); setBusyId(id);
+    start(async () => {
+      try {
+        const r: any = await approveOrder(id);
+        if (r?.error) setActErr(r.error);
+        router.refresh();
+      } catch {
+        setActErr('Onay verilemedi. Bağlantınızı kontrol edip tekrar deneyin.');
+      } finally {
+        setBusyId(null);
+      }
+    });
+  }
   const [q, setQ] = useState('');
   const [qf, setQf] = useState<QuoteFilter>('acik');
   const [of, setOf] = useState<OrderFilter>('acik');
 
   const pendingChecks = useMemo(
-    () => quotes.filter(x => ['taslak', 'kontrolde'].includes(x.status)
-      && (!x.finance_checked_at || !x.sales_checked_at)).length,
+    () => quotes.filter(x => ['taslak', 'kontrolde'].includes(x.status)).length,
     [quotes]
   );
   const expired = useMemo(
@@ -154,15 +174,14 @@ export default function OrdersClient({
     [quotes, todayIso]
   );
   const awaitingStock = useMemo(
-    () => orders.filter(o => !o.stock_confirmed_at && !ORDER_CLOSED.includes(o.status)).length,
+    () => orders.filter(o => ORDER_PENDING.includes(o.status)).length,
     [orders]
   );
 
   const quoteMatches = (x: QuoteRow, f: QuoteFilter) => {
-    const checks = (x.finance_checked_at ? 1 : 0) + (x.sales_checked_at ? 1 : 0);
     switch (f) {
       case 'acik': return !QUOTE_CLOSED.includes(x.status);
-      case 'kontrol': return ['taslak', 'kontrolde'].includes(x.status) && checks < 2;
+      case 'kontrol': return ['taslak', 'kontrolde'].includes(x.status);
       case 'onayli': return ['onayli', 'sunuldu'].includes(x.status);
       case 'kapali': return QUOTE_CLOSED.includes(x.status);
       default: return true;
@@ -172,7 +191,7 @@ export default function OrdersClient({
   const orderMatches = (x: OrderRow, f: OrderFilter) => {
     switch (f) {
       case 'acik': return !ORDER_CLOSED.includes(x.status);
-      case 'teyit': return !x.stock_confirmed_at && !ORDER_CLOSED.includes(x.status);
+      case 'teyit': return ORDER_PENDING.includes(x.status);
       case 'yolda': return ['onayli', 'sevk_edildi'].includes(x.status);
       case 'kapali': return ORDER_CLOSED.includes(x.status);
       default: return true;
@@ -222,9 +241,9 @@ export default function OrdersClient({
       <header className="px-1 space-y-3">
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-[28px] leading-tight font-bold tracking-tight">Teklif &amp; Sipariş</h1>
+            <h1 className="text-[28px] leading-tight font-bold tracking-tight">Satış</h1>
             <p className="text-[14px] text-[#8E8E93] truncate">
-              {quotes.length} teklif · {orders.length} sipariş
+              {orders.length} sipariş · {quotes.length} teklif
             </p>
           </div>
         </div>
@@ -232,7 +251,7 @@ export default function OrdersClient({
             verilmiş, müşteri kabul etmiş — teklif belgesi beklemeden sipariş. */}
         <div className="flex gap-2 flex-wrap">
           <Link href={directHref} className="btn-primary">
-            <Zap size={16} /> Doğrudan Sipariş
+            <Zap size={16} /> Doğrudan Satış
           </Link>
           <Link href={newQuoteHref} className="btn-outline">
             <Plus size={16} /> Yeni Teklif
@@ -260,7 +279,7 @@ export default function OrdersClient({
           {pendingChecks > 0 && (
             <button onClick={() => { setTab('quotes'); setQf('kontrol'); }}
               className="w-full text-left text-[13px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
-              {pendingChecks} teklif kontrol bekliyor — mali kontrol ve satış kontrolü tamamlanmadan onaylanamaz.
+              {pendingChecks} teklif onay bekliyor.
             </button>
           )}
           {expired > 0 && (
@@ -273,20 +292,20 @@ export default function OrdersClient({
           {awaitingStock > 0 && (
             <button onClick={() => { setTab('orders'); setOf('teyit'); }}
               className="w-full text-left text-[13px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
-              {awaitingStock} sipariş stok ve sevk teyidi bekliyor.
+              {awaitingStock} sipariş onay bekliyor — listeden tek dokunuşla onaylayın.
             </button>
           )}
         </div>
       )}
 
       <div className="segment">
-        <button onClick={() => setTab('quotes')}
-          className={`segment-item ${tab === 'quotes' ? 'segment-item-active' : ''} flex items-center justify-center gap-1.5`}>
-          <FileText size={14} /> Teklifler ({quotes.length})
-        </button>
         <button onClick={() => setTab('orders')}
           className={`segment-item ${tab === 'orders' ? 'segment-item-active' : ''} flex items-center justify-center gap-1.5`}>
           <Package size={14} /> Siparişler ({orders.length})
+        </button>
+        <button onClick={() => setTab('quotes')}
+          className={`segment-item ${tab === 'quotes' ? 'segment-item-active' : ''} flex items-center justify-center gap-1.5`}>
+          <FileText size={14} /> Teklifler ({quotes.length})
         </button>
       </div>
 
@@ -317,6 +336,8 @@ export default function OrdersClient({
           ? <ListExport rows={fQuotes} cols={quoteCols} name="teklifler" />
           : <ListExport rows={fOrders} cols={orderCols} name="siparisler" />}
       </div>
+
+      {actErr && <p className="alert-error">{actErr}</p>}
 
       <div className="card divide-y divide-white/[0.08] overflow-hidden">
         {tab === 'quotes' ? (
@@ -357,7 +378,7 @@ export default function OrdersClient({
           })
         ) : (
           fOrders.length === 0 ? (
-            <Empty icon="📦" text="Bu filtrede sipariş yok. Sözlü teklif verildiyse Doğrudan Sipariş'i kullanın." />
+            <Empty icon="📦" text="Bu filtrede sipariş yok. Fiyat sahada konuşulduysa Doğrudan Satış ile hemen sipariş açın." />
           ) : fOrders.map(x => {
             const next = orderNext(x);
             return (
@@ -371,6 +392,7 @@ export default function OrdersClient({
                     <p className="text-[13px] text-[#8E8E93] truncate mt-0.5">
                       {tl(x.total_amount)}
                       {x.delivery_date ? ` · teslim ${fmtD(x.delivery_date)}` : ''}
+                      {x.quotes?.is_verbal ? ' · doğrudan satış' : ''}
                     </p>
                     {next && <p className="text-[12px] text-ios-blue mt-0.5 truncate">→ {next}</p>}
                   </div>
@@ -379,6 +401,12 @@ export default function OrdersClient({
                   </span>
                   <ChevronRight size={15} className="text-[#C7C7CC] shrink-0" />
                 </Link>
+                {ORDER_PENDING.includes(x.status) && (
+                  <button type="button" disabled={busy} onClick={() => quickApprove(x.id)}
+                    className="shrink-0 min-h-[44px] rounded-lg bg-emerald-500/15 text-emerald-300 px-3 text-[13px] font-semibold flex items-center gap-1.5 disabled:opacity-40">
+                    <CheckCircle2 size={15} /> {busyId === x.id ? '…' : 'Onayla'}
+                  </button>
+                )}
                 <DeleteButton
                   message={`${x.order_no ? `#${x.order_no} ` : ''}${x.outlets?.name ?? 'nokta'} siparişi silinecek. Sevk edilmişse silinmez.`}
                   action={r => deleteOrder(x.id, r)} askReason />
@@ -396,8 +424,8 @@ function Pill({
 }: { label: string; count: number; active: boolean; onClick: () => void }) {
   return (
     <button onClick={onClick}
-      className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors flex items-center gap-1.5 ${
-        active ? 'bg-ios-blue text-white' : 'bg-[#1C1C1E] text-[#D1D1D6] shadow-[0_0_0_0.5px_rgba(255,255,255,0.09)]'
+      className={`shrink-0 min-h-[40px] rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors flex items-center gap-1.5 ${
+        active ? 'bg-ios-blue text-white' : 'bg-[#1C1C1E] text-[#D1D1D6] border border-white/10'
       }`}>
       {label}
       <span className={`text-[11px] rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center ${

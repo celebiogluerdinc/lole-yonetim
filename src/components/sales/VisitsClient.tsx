@@ -103,7 +103,7 @@ export default function VisitsClient({ visits }: { visits: VisitRow[] }) {
           <button key={f.key} onClick={() => setFilter(f.key)}
             className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors flex items-center gap-1.5 ${
               filter === f.key ? 'bg-ios-blue text-white'
-                : 'bg-[#1C1C1E] text-[#D1D1D6] shadow-[0_0_0_0.5px_rgba(255,255,255,0.09)]'
+                : 'bg-[#1C1C1E] text-[#D1D1D6] border border-white/10'
             }`}>
             {f.label}
             <span className={`text-[11px] rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center ${

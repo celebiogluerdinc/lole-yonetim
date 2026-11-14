@@ -10,7 +10,12 @@ export const dynamic = 'force-dynamic';
  * `?outlet=<id>` ile nokta kartından gelindiğinde liste o noktaya
  * daraltılıyor ve "Yeni Teklif" de aynı noktaya kilitli açılıyor —
  * nokta kartından çıkıp yeniden nokta seçmek zorunda kalmamak için.
- * `?tab=orders` doğrudan sipariş sekmesini açar.
+ * Varsayılan sekme SİPARİŞLER: sahadaki asıl iş bekleyen siparişi
+ * onaylamak. `?tab=quotes` teklif sekmesini açar.
+ *
+ * Sözlü teklifler (doğrudan satışın arka planda açtığı kayıt) teklif
+ * listesinde gösterilmiyor — kullanıcının hiç yazmadığı bir belgeyi
+ * listede görmesi "bu ne" sorusundan başka bir şey üretmiyordu.
  */
 export default async function OrdersPage({
   searchParams
@@ -23,9 +28,10 @@ export default async function OrdersPage({
   // admin hepsini görür. Burada ek filtre gereksiz.
   let qSel = supabase.from('quotes')
     .select('id, quote_no, status, total_incl_vat, valid_until, created_at, finance_checked_at, sales_checked_at, outlets:outlet_id(name, district)')
+    .eq('is_verbal', false)
     .order('created_at', { ascending: false }).limit(200);
   let oSel = supabase.from('sales_orders')
-    .select('id, order_no, status, total_amount, delivery_date, created_at, stock_confirmed_at, outlets:outlet_id(name, district)')
+    .select('id, order_no, status, total_amount, delivery_date, created_at, stock_confirmed_at, outlets:outlet_id(name, district), quotes:quote_id(is_verbal)')
     .order('created_at', { ascending: false }).limit(200);
 
   if (outletId) {
@@ -50,7 +56,7 @@ export default async function OrdersPage({
       todayIso={todayIso}
       outletId={outletId}
       outletName={outlet?.name ?? null}
-      initialTab={searchParams.tab === 'orders' ? 'orders' : 'quotes'}
+      initialTab={searchParams.tab === 'quotes' ? 'quotes' : 'orders'}
     />
   );
 }
